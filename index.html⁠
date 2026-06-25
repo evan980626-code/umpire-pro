@@ -1,0 +1,2197 @@
+```react
+import React, { useState, useEffect, useRef } from "react";
+
+/* ═══════════════════════════════════════════════════════════
+   音效合成器 (Sound Synthesis with Custom Frequency Mapping)
+═══════════════════════════════════════════════════════════ */
+class SoundSynth {
+  constructor() { 
+    this.ctx = null; 
+    this.muted = false; 
+  }
+  _init() {
+    if (!this.ctx) {
+      try { 
+        this.ctx = new (window.AudioContext || window.webkitAudioContext)(); 
+      } catch (e) {
+        console.error("AudioContext 初始化失敗", e);
+      }
+    }
+  }
+  _tone(freq, type, dur, vol = 0.25, endFreq) {
+    this._init(); 
+    if (!this.ctx || this.muted) return;
+    const ctx = this.ctx;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.type = type; 
+    o.frequency.setValueAtTime(freq, ctx.currentTime);
+    if (endFreq) {
+      o.frequency.exponentialRampToValueAtTime(endFreq, ctx.currentTime + dur);
+    }
+    g.gain.setValueAtTime(vol, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+    o.connect(g); 
+    g.connect(ctx.destination); 
+    o.start(); 
+    o.stop(ctx.currentTime + dur + 0.05);
+  }
+  playWhoosh()  { this._tone(180, "sine",     0.22, 0.18, 900);  }
+  playPop()     { this._tone(140, "sine",     0.12, 0.60, 45);   }
+  playWhistle() { this._tone(1800,"sine",     0.40, 0.22, 2100); }
+  playBuzzer()  { this._tone(110, "sawtooth", 0.50, 0.28, 100);  }
+  playAbsScan() { this._tone(800, "square",   0.90, 0.08, 1400); }
+  playAbsOk()   { this._tone(880, "sine",     0.50, 0.35);       }
+  playAbsFail() { this._tone(300, "triangle", 0.50, 0.35, 150);  }
+  playBoo()     { this._tone(90,  "sawtooth", 0.60, 0.25, 70);   }
+  playCheer()   { this._tone(330, "sine",     0.40, 0.20, 440);  }
+  playCrack()   { this._tone(600, "triangle", 0.15, 0.40, 180);  }
+  playLevelUp() {
+    this._init(); 
+    if (!this.ctx || this.muted) return;
+    const ctx = this.ctx;
+    [[523, 0], [659, 0.14], [784, 0.28], [1047, 0.45]].forEach(([f, t]) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = "sine"; 
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.3, ctx.currentTime + t);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.28);
+      o.connect(g); 
+      g.connect(ctx.destination);
+      o.start(ctx.currentTime + t); 
+      o.stop(ctx.currentTime + t + 0.32);
+    });
+  }
+}
+const synth = new SoundSynth();
+
+function speak(text, muted) {
+  if (muted || !window.speechSynthesis) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = "en-US"; 
+  u.rate = 1.35; 
+  u.pitch = 0.85;
+  window.speechSynthesis.speak(u);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   幾何凸包演算法 (Convex Hull for Subjective Zone Warping)
+═══════════════════════════════════════════════════════════ */
+function convexHull(pts) {
+  if (pts.length < 3) return pts;
+  const s = [...pts].sort((a, b) => a.x !== b.x ? a.x - b.x : a.y - b.y);
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower = [], upper = [];
+  for (const p of s) { 
+    while (lower.length >= 2 && cross(lower[lower.length-2], lower[lower.length-1], p) <= 0) {
+      lower.pop(); 
+    }
+    lower.push(p); 
+  }
+  for (let i = s.length - 1; i >= 0; i--) { 
+    while (upper.length >= 2 && cross(upper[upper.length-2], upper[upper.length-1], s[i]) <= 0) {
+      upper.pop(); 
+    }
+    upper.push(s[i]); 
+  }
+  upper.pop(); 
+  return lower.concat(upper);
+}
+
+function pointInPolygon(x, y, vs) {
+  let inside = false;
+  for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+    const xi = vs[i].x, yi = vs[i].y, xj = vs[j].x, yj = vs[j].y;
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   靜態數據 (Static Data)
+═══════════════════════════════════════════════════════════ */
+const PITCH_TYPES = [
+  { abbr: "FB", name: "四縫線速球", spd: [146, 160], spin: [2200, 2550], brkX: 0,   brkY: -10, color: "#FF3E3E" },
+  { abbr: "SI", name: "二縫線伸卡", spd: [140, 150], spin: [1950, 2200], brkX: -24, brkY: 14,  color: "#FF8844" },
+  { abbr: "CT", name: "卡特球",     spd: [138, 148], spin: [2150, 2400], brkX: 18,  brkY: 2,   color: "#FF44AA" },
+  { abbr: "CB", name: "曲球",       spd: [110, 122], spin: [2600, 2950], brkX: 28,  brkY: 56,  color: "#3399FF" },
+  { abbr: "SL", name: "滑球",       spd: [122, 134], spin: [2400, 2800], brkX: -38, brkY: 18,  color: "#FFD000" },
+  { abbr: "SF", name: "指叉球",     spd: [126, 136], spin: [1100, 1450], brkX: 3,   brkY: 45,  color: "#00E0A0" },
+  { abbr: "KN", name: "指節球",     spd: [65, 80],   spin: [250, 400],   brkX: 5,   brkY: 60,  color: "#FF99FF" },
+];
+
+const BATTERS = [
+  { name: "賈吉",   ht: "201cm", tB: -1.20, bB: 0.90, stance: "R", eye: "A", aggro: 0.45, hotZone: "high" },
+  { name: "大谷",   ht: "193cm", tB: -1.00, bB: 1.00, stance: "L", eye: "S", aggro: 0.55, hotZone: "low" },
+  { name: "阿圖維", ht: "168cm", tB: -0.75, bB: 0.82, stance: "R", eye: "B", aggro: 0.60, hotZone: "inner" },
+  { name: "貝茲",   ht: "183cm", tB: -0.90, bB: 0.92, stance: "L", eye: "A", aggro: 0.38, hotZone: "outer" },
+  { name: "特勞特", ht: "188cm", tB: -1.00, bB: 0.95, stance: "R", eye: "S", aggro: 0.42, hotZone: "middle" },
+];
+
+const PITCHERS = [
+  { name: "格蘭特 (火球/控球普)",    sMult: 1.08, bMult: 0.95, err: 0.28 },
+  { name: "席瓦爾 (變化球/控球普)",  sMult: 0.82, bMult: 1.65, err: 0.24 },
+  { name: "田中 (精準控球大師)",     sMult: 0.95, bMult: 1.15, err: 0.08 },
+  { name: "迪葛洛 (全能型)",         sMult: 1.02, bMult: 1.25, err: 0.16 },
+];
+
+const CATCHERS = [
+  { name: "莫里納",  fm: 1.95, desc: "S級：手套極輕，手腕柔順扯動偷球",  cls: "text-amber-400"   },
+  { name: "拉契曼",  fm: 1.30, desc: "A級：穩健接起，定格在接球位置",    cls: "text-emerald-400" },
+  { name: "桑契斯",  fm: 0.35, desc: "C級：接球刺拍，慣性反彈導致好球變壞球", cls: "text-red-400"     },
+];
+
+const LEVELS = [
+  { title: "1A 菜鳥裁判",    xpMax: 100   },
+  { title: "2A 聯盟執法",    xpMax: 300   },
+  { title: "3A 頂級預備役",  xpMax: 700   },
+  { title: "MLB 大聯盟主審", xpMax: 1500  },
+  { title: "MLB 季後賽名哨", xpMax: 99999 },
+];
+
+const WINDS = [
+  { name: "無風靜止", x: 0, y: 0, icon: "🍃" },
+  { name: "強烈逆風", x: 0, y: -0.15, icon: "⬇️" },
+  { name: "順風推波", x: 0, y: 0.15, icon: "⬆️" },
+  { name: "左側強風", x: -0.18, y: 0, icon: "⬅️" },
+  { name: "右側強風", x: 0.18, y: 0, icon: "➡️" },
+  { name: "紊亂陣風", x: 0.08, y: -0.1, icon: "💨" }
+];
+
+const EXAMS_LIST = [
+  { id: "free", name: "自由特訓模式", desc: "常規執法，無球數限制，適合日常練習與累積經驗。", type: "practice", target: 0 },
+  { id: "exam_fastball", name: "⚡ 速球邊角大師證照考試", desc: "連續十顆壓制邊角的極速直球考驗。必須至少判定正確 8 球。", type: "exam", target: 8, icon: "🔥" },
+  { id: "exam_breaking", name: "🌀 銳利變化球專科考試", desc: "全是具有大位移折射的曲球或滑球。必須至少判定正確 8 球。", type: "exam", target: 8, icon: "🌪️" },
+  { id: "exam_framing", name: "🛡️ 抗接球偷幀對抗考試", desc: "捕手具備超高Framing偷球技術。必須頂住視覺誤差，判定正確 8 球。", type: "exam", target: 8, icon: "👁️" }
+];
+
+const ACHIEVEMENTS_LIST = [
+  { id: "perfect_10", title: "🎯 十連精確判決", desc: "在不使用電子挑戰的情況下，連續達成 10 次正確判決。", icon: "🔥" },
+  { id: "exam_fastball", title: "⚡ 速球大師認證", desc: "成功通過速球邊角大師證照考試。", icon: "⚡" },
+  { id: "exam_breaking", title: "🌀 變化球專科認證", desc: "成功通過銳利變化球專科考試。", icon: "🌀" },
+  { id: "exam_framing", title: "🛡️ 抗偷幀專家認證", desc: "成功通過抗接球偷幀對抗考試。", icon: "🛡️" }
+];
+
+/* ═══════════════════════════════════════════════════════════
+   主 App 組件
+═══════════════════════════════════════════════════════════ */
+export default function App() {
+  /* ── 畫面與分頁 ── */
+  const [screen, setScreen] = useState("menu");
+  const [tab, setTab] = useState("game");
+
+  /* ── 裁判生涯檔案 ── */
+  const [umpireName, setUmpireName] = useState("尤里");
+  const [xp, setXp] = useState(0);
+  const [lvl, setLvl] = useState(0);
+  const [rep, setRep] = useState(100);
+  const [streak, setStreak] = useState(0);
+  const [bestStreak, setBestStreak] = useState(0);
+  const [combo, setCombo] = useState(1.0);
+  const [achievements, setAchievements] = useState([]); 
+
+  /* ── 🎖️ 解鎖的專業執照勳章 (證照系統) ── */
+  const [unlockedCerts, setUnlockedCerts] = useState([]);
+
+  /* ── 🎓 主審考核模式狀態 ── */
+  const [activeExam, setActiveExam] = useState("free"); 
+  const [examPitches, setExamPitches] = useState(0);     
+  const [examCorrect, setExamCorrect] = useState(0);     
+  const [showExamResult, setShowExamResult] = useState(null); 
+
+  /* ── 球賽出局與好壞球數 ── */
+  const [inning, setInning] = useState(1);
+  const [isTop, setIsTop] = useState(true);
+  const [outs, setOuts] = useState(0);
+  const [strikes, setStrikes] = useState(0);
+  const [balls, setBalls] = useState(0);
+  const [awayScore, setAwayScore] = useState(0);
+  const [homeScore, setHomeScore] = useState(0);
+  const [runners, setRunners] = useState([false, false, false]);
+  const [awayCh, setAwayCh] = useState(3);
+  const [homeCh, setHomeCh] = useState(3);
+
+  /* ── 環境大氣物理 ── */
+  const [wind, setWind] = useState(WINDS[0]);
+
+  /* ── 球員與配置數據 ── */
+  const [batter, setBatter] = useState(BATTERS[0]);
+  const [pitcher, setPitcher] = useState(PITCHERS[0]);
+  const [catcher, setCatcher] = useState(CATCHERS[0]);
+
+  /* ── 投球動態 Sequence ── */
+  const [pitch, setPitch] = useState(null);
+  const [phase, setPhase] = useState("ready"); 
+  const [ballProg, setBallProg] = useState(0);
+  const [ballPos, setBallPos] = useState({ x: 0, y: -1.2 });
+  const [zoneHidden, setZoneHidden] = useState(false);
+  const [locked, setLocked] = useState(false);
+  const [fadeP, setFadeP] = useState(0);
+  const [ctarget, setCtarget] = useState({ x: 0, y: 0 });
+  const [crossUp, setCrossUp] = useState(false);
+  const [fluke, setFluke] = useState("normal");
+
+  /* ── 打者揮棒與擊球決策系統 ── */
+  const [isSwingTriggered] = useState(false);
+
+  /* ── ABS 鷹眼挑戰狀態 ── */
+  const [challenge, setChallenge] = useState(null);
+  const [absP, setAbsP] = useState(0);
+  const [absComplete, setAbsComplete] = useState(false); 
+  const [absVerdict, setAbsVerdict] = useState(false);   
+
+  /* ── 觀眾情緒 & 局部畫布防抖震動 ── */
+  const [crowdFavor, setCrowdFavor] = useState(50); 
+  const [screenShake, setScreenShake] = useState(false);
+  const [activeCallEffect, setActiveCallEffect] = useState(null); 
+  const [showInningReport, setShowInningReport] = useState(false);
+  const [inningReportData, setInningReportData] = useState({
+    pitchesCount: 0,
+    strikesCalled: 0,
+    ballsCalled: 0,
+    correctCalls: 0,
+    inningXp: 0,
+    hostilityDelta: 0
+  });
+
+  /* ── UI 反饋 ── */
+  const [fb, setFb] = useState({ text: "", type: "" });
+  const [muted, setMuted] = useState(false);
+  const [notif, setNotif] = useState("");
+  const [reactionMs, setReactionMs] = useState(null);
+  const [zoneMargin, setZoneMargin] = useState(0.0);
+
+  /* ── 歷史記錄 ── */
+  const [history, setHistory] = useState([]);
+  const [recent, setRecent] = useState([]);
+
+  /* ── 主觀心智好球帶分裂 ── */
+  const [zVerts, setZVerts] = useState([]);
+  const [miscalls, setMiscalls] = useState(0);
+  const [inconsistentCount, setInconsistentCount] = useState(0);
+
+  /* ── Refs: 避免閉包舊數據 ── */
+  const phaseR      = useRef("ready");
+  const lockedR     = useRef(false);
+  const absCompleteR = useRef(false);
+  const absVerdictR = useRef(false);
+  const miscallsR   = useRef(0);
+  const strikesR    = useRef(0);
+  const ballsR      = useRef(0);
+  const outsR       = useRef(0);
+  const isTopR      = useRef(true);
+  const inningR     = useRef(1);
+  const streakR     = useRef(0);
+  const decisionT   = useRef(null);
+
+  /* ── 單半局歷史與執法統計暫存 ── */
+  const inningPitchesCount = useRef(0);
+  const inningStrikesCalled = useRef(0);
+  const inningBallsCalled = useRef(0);
+  const inningCorrectCalls = useRef(0);
+  const inningXpEarned = useRef(0);
+  const startCrowdFavor = useRef(50);
+
+  /* 保持 Refs 同步 */
+  useEffect(() => { phaseR.current       = phase;   }, [phase]);
+  useEffect(() => { lockedR.current      = locked;  }, [locked]);
+  useEffect(() => { absCompleteR.current = absComplete; }, [absComplete]);
+  useEffect(() => { absVerdictR.current  = absVerdict; }, [absVerdict]);
+  useEffect(() => { strikesR.current     = strikes; }, [strikes]);
+  useEffect(() => { ballsR.current       = balls;   }, [balls]);
+  useEffect(() => { outsR.current        = outs;    }, [outs]);
+  useEffect(() => { isTopR.current       = isTop;   }, [isTop]);
+  useEffect(() => { inningR.current      = inning;  }, [inning]);
+  useEffect(() => { streakR.current      = streak;  }, [streak]);
+  useEffect(() => { synth.muted          = muted;   }, [muted]);
+
+  /* 鍵盤操作的 Stable 函數 Refs */
+  const startPitchR   = useRef(null);
+  const triggerCallR  = useRef(null);
+  const confirmChalR  = useRef(null);
+
+  /* 換打者時，重置主觀心智帶，並更新風向物理 */
+  useEffect(() => {
+    const { tB, bB } = batter;
+    setZVerts([{ x: -1, y: tB }, { x: 1, y: tB }, { x: 1, y: bB }, { x: -1, y: bB }]);
+    miscallsR.current = 0; 
+    setMiscalls(0);
+    setWind(WINDS[Math.floor(Math.random() * WINDS.length)]);
+  }, [batter]);
+
+  /* 等級提升檢測 */
+  const curLvl = LEVELS[lvl];
+  const xpFrac = (xp / curLvl.xpMax);
+
+  useEffect(() => {
+    const cur = LEVELS[lvl];
+    if (xp >= cur.xpMax && lvl < LEVELS.length - 1) {
+      const nextTitle = LEVELS[lvl + 1].title;
+      setLvl(l => l + 1);
+      setNotif(`🎉 晉升！成為【${nextTitle}】！`);
+      synth.playLevelUp();
+      const t = setTimeout(() => setNotif(""), 4500);
+      return () => clearTimeout(t);
+    }
+  }, [xp, lvl]);
+
+  /* 捕手目標引導位置生成 */
+  useEffect(() => {
+    if (phase !== "ready") return;
+    const { tB, bB } = batter;
+    const zH = bB - tB;
+    const wantStrike = Math.random() < 0.42;
+    let tX, tY;
+    if (wantStrike) {
+      tX = (Math.random() - 0.5) * 1.6; 
+      tY = tB + Math.random() * zH;
+    } else {
+      const side = Math.floor(Math.random() * 4);
+      const out = 0.25 + Math.random() * 0.65;
+      if      (side === 0) { tX = -1.1 - out; tY = tB + Math.random() * zH; }
+      else if (side === 1) { tX =  1.1 + out; tY = tB + Math.random() * zH; }
+      else if (side === 2) { tX = (Math.random() - 0.5) * 1.8; tY = tB - out; }
+      else                 { tX = (Math.random() - 0.5) * 1.8; tY = bB + out; }
+    }
+    setCtarget({ x: tX, y: tY }); 
+    setFadeP(0);
+  }, [phase, batter]);
+
+  /* ABS 鷹眼電子掃描迴圈動畫 */
+  useEffect(() => {
+    if (phase !== "challenge" || !challenge || absComplete) return;
+    synth.playAbsScan();
+    let raf;
+    const anim = () => {
+      setAbsP(p => {
+        if (p >= 1.0) {
+          setAbsComplete(true);
+          absCompleteR.current = true;
+          setFb({ text: "🛎️ 軌跡運算完成！請點選「電子宣判」揭曉判定結果。", type: "pulse" });
+          return 1.0;
+        }
+        raf = requestAnimationFrame(anim);
+        return p + 0.008; 
+      });
+    };
+    raf = requestAnimationFrame(anim);
+    return () => cancelAnimationFrame(raf);
+  }, [phase, challenge, absComplete]);
+
+  /* 全域熱鍵管理 */
+  useEffect(() => {
+    const h = (e) => {
+      const p = phaseR.current;
+      if (lockedR.current) return;
+      if ((e.code === "Space" || e.code === "Enter") && p === "ready") {
+        e.preventDefault(); 
+        startPitchR.current?.();
+      } else if ((e.code === "Space" || e.code === "Enter") && p === "challenge" && absCompleteR.current) {
+        e.preventDefault(); 
+        confirmChalR.current?.();
+      } else if ((e.code === "KeyS" || e.code === "ArrowRight") && p === "decision") {
+        e.preventDefault();
+        triggerCallR.current?.("strike_action");
+      } else if ((e.code === "KeyB" || e.code === "ArrowLeft") && p === "decision") {
+        e.preventDefault();
+        triggerCallR.current?.("ball_action");
+      }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
+
+  /* 解鎖成就里程碑機制 */
+  const unlockAchievement = (id) => {
+    if (achievements.includes(id)) return;
+    const ach = ACHIEVEMENTS_LIST.find(a => a.id === id);
+    if (!ach) return;
+    setAchievements(prev => [...prev, id]);
+    setNotif(`🎖️ 解鎖成就：【${ach.title}】！`);
+    synth.playLevelUp();
+    setTimeout(() => setNotif(""), 4500);
+  };
+
+  /* ════ 核心數據計算 ════ */
+  const total = history.length;
+  const correctCount = history.filter(h => h.isCorrect).length;
+  const acc = total > 0 ? Math.round((correctCount / total) * 100) : 100;
+  const consist = total > 0 ? Math.max(0, Math.round(((total - inconsistentCount) / total) * 100)) : 100;
+
+  const statsByType = PITCH_TYPES.map(type => {
+    const pitchesOfType = history.filter(h => h.type.abbr === type.abbr);
+    const correctPitches = pitchesOfType.filter(h => h.isCorrect);
+    return {
+      abbr: type.abbr,
+      name: type.name,
+      color: type.color,
+      total: pitchesOfType.length,
+      correct: correctPitches.length
+    };
+  }).filter(t => t.total > 0);
+
+  const streakIndicatorColor = streak >= 8 ? "text-rose-400" : streak >= 5 ? "text-amber-400" : "text-emerald-400";
+
+  /* ════ 核心輔助機制 ════ */
+  const rotateBatter = () => {
+    setBatter(prev => {
+      const opts = BATTERS.filter(b => b.name !== prev.name);
+      return opts[Math.floor(Math.random() * opts.length)] || BATTERS[0];
+    });
+    if (Math.random() < 0.35) setPitcher(PITCHERS[Math.floor(Math.random() * PITCHERS.length)]);
+    if (Math.random() < 0.25) setCatcher(CATCHERS[Math.floor(Math.random() * CATCHERS.length)]);
+    setStrikes(0); 
+    strikesR.current = 0;
+    setBalls(0);   
+    ballsR.current   = 0;
+  };
+
+  const triggerInningSummary = () => {
+    setInningReportData({
+      pitchesCount: inningPitchesCount.current,
+      strikesCalled: inningStrikesCalled.current,
+      ballsCalled: inningBallsCalled.current,
+      correctCalls: inningCorrectCalls.current,
+      inningXp: inningXpEarned.current,
+      hostilityDelta: crowdFavor - startCrowdFavor.current
+    });
+    setShowInningReport(true);
+  };
+
+  const closeInningReportAndContinue = () => {
+    setShowInningReport(false);
+    inningPitchesCount.current = 0;
+    inningStrikesCalled.current = 0;
+    inningBallsCalled.current = 0;
+    inningCorrectCalls.current = 0;
+    inningXpEarned.current = 0;
+    startCrowdFavor.current = crowdFavor;
+
+    setOuts(0);    
+    outsR.current  = 0;
+    setStrikes(0); 
+    strikesR.current = 0;
+    setBalls(0);   
+    ballsR.current   = 0;
+    setRunners([false, false, false]);
+
+    setIsTop(t => {
+      const newTop = !t;
+      isTopR.current = newTop;
+      if (!t) {
+        setInning(i => { 
+          const ni = i + 1; 
+          inningR.current = ni; 
+          return ni; 
+        });
+      }
+      return newTop;
+    });
+
+    rotateBatter();
+  };
+
+  const doThreeOuts = () => {
+    speak("Three outs! Side retired.", muted);
+    triggerInningSummary();
+  };
+
+  const doStrikeout = () => {
+    const newOuts = outsR.current + 1;
+    speak("Strikeout!", muted);
+    rotateBatter();
+    if (newOuts >= 3) {
+      setOuts(3); 
+      outsR.current = 3;
+      setTimeout(doThreeOuts, 400);
+    } else {
+      setOuts(newOuts); 
+      outsR.current = newOuts;
+    }
+  };
+
+  const doWalk = () => {
+    setRunners(prev => {
+      let runs = 0; 
+      const nr = [...prev];
+      if (!nr[0]) nr[0] = true;
+      else if (!nr[1]) { nr[1] = true; nr[0] = false; }
+      else if (!nr[2]) { nr[2] = true; nr[1] = false; }
+      else runs = 1;
+      
+      if (runs > 0) {
+        if (isTopR.current) {
+          setAwayScore(s => s + runs); 
+        } else {
+          setHomeScore(s => s + runs);
+        }
+      }
+      return nr;
+    });
+    speak("Walk!", muted);
+    rotateBatter();
+  };
+
+  /* 🧠 主觀心智好球帶分裂變形機制 */
+  const warpZone = (p) => {
+    miscallsR.current += 1; 
+    setMiscalls(miscallsR.current);
+    
+    setZVerts(prev => {
+      if (prev.length === 4) {
+        let best = Infinity, ins = 0;
+        for (let i = 0; i < 4; i++) {
+          const nx = (i + 1) % 4;
+          const mx = (prev[i].x + prev[nx].x) / 2;
+          const my = (prev[i].y + prev[nx].y) / 2;
+          const d = Math.hypot(mx - p.realX, my - p.realY);
+          if (d < best) { 
+            best = d; 
+            ins = nx; 
+          }
+        }
+        const v = [...prev]; 
+        v.splice(ins, 0, { x: p.realX * 0.9, y: p.realY * 0.9 }); 
+        return v;
+      } else {
+        let ci = 0, md = Infinity;
+        for (let i = 0; i < prev.length; i++) {
+          const d = Math.hypot(prev[i].x - p.realX, prev[i].y - p.realY);
+          if (d < md) { 
+            md = d; 
+            ci = i; 
+          }
+        }
+        const v = [...prev];
+        const mixRatio = 0.65;
+        v[ci] = { x: v[ci].x * (1 - mixRatio) + p.realX * mixRatio, y: v[ci].y * (1 - mixRatio) + p.realY * mixRatio };
+        if (v.length < 8 && Math.random() < 0.5) {
+          v.push({ x: p.realX * 0.85, y: p.realY * 0.85 });
+          return convexHull(v);
+        }
+        return v;
+      }
+    });
+  };
+
+  /* 投球物理模擬與進壘路徑計算 */
+  const startPitch = () => {
+    if (phaseR.current !== "ready" || lockedR.current) return;
+    setLocked(true); 
+    lockedR.current = true;
+    setZoneHidden(true); 
+    setFb({ text: "🔒 好球帶隱形！捕手手套下滑蓄力中…", type: "pulse" });
+    setPhase("ready_fading"); 
+    phaseR.current = "ready_fading";
+    
+    const t0 = Date.now();
+    const loop = () => {
+      const p = Math.min(1.0, (Date.now() - t0) / 200);
+      setFadeP(p);
+      if (p < 1.0) {
+        requestAnimationFrame(loop); 
+      } else {
+        executePitch();
+      }
+    };
+    requestAnimationFrame(loop);
+  };
+  startPitchR.current = startPitch;
+
+  const executePitch = () => {
+    let type = PITCH_TYPES[Math.floor(Math.random() * PITCH_TYPES.length)];
+    let activeCatcher = catcher;
+
+    if (activeExam === "exam_fastball") {
+      const fbs = PITCH_TYPES.filter(t => t.abbr === "FB" || t.abbr === "SI");
+      type = fbs[Math.floor(Math.random() * fbs.length)] || PITCH_TYPES[0];
+    } else if (activeExam === "exam_breaking") {
+      const brks = PITCH_TYPES.filter(t => t.abbr === "CB" || t.abbr === "SL");
+      type = brks[Math.floor(Math.random() * brks.length)] || PITCH_TYPES[3];
+    } else if (activeExam === "exam_framing") {
+      activeCatcher = CATCHERS.find(c => c.name === "莫里納") || catcher;
+    }
+
+    const { tB, bB } = batter;
+    const cY = (tB + bB) / 2;
+    const eff = 1.0 + zoneMargin;
+    
+    const isExam = activeExam !== "free";
+    const isStrikeTarget = Math.random() < 0.44;
+    let x = 0, y = cY;
+
+    if (isExam || Math.random() < 0.7) {
+      const side = Math.floor(Math.random() * 4);
+      const mo = (Math.random() - 0.5) * 0.08; 
+      if      (side === 0) { x = -eff + mo;              y = tB + Math.random() * (bB - tB); }
+      else if (side === 1) { x =  eff + mo;              y = tB + Math.random() * (bB - tB); }
+      else if (side === 2) { x = (Math.random()-0.5)*1.6; y = tB - zoneMargin + mo; }
+      else                 { x = (Math.random()-0.5)*1.6; y = bB + zoneMargin + mo; }
+    } else {
+      if (isStrikeTarget) {
+        x = (Math.random()-0.5)*1.4; 
+        y = cY + (Math.random()-0.5)*(bB-tB)*0.7;
+      } else {
+        const side = Math.floor(Math.random() * 4);
+        const out = 0.25 + Math.random() * 0.55;
+        if      (side === 0) { x = -eff - out; y = cY + (Math.random()-0.5)*1.6; }
+        else if (side === 1) { x =  eff + out; y = cY + (Math.random()-0.5)*1.6; }
+        else if (side === 2) { x = (Math.random()-0.5)*2.2; y = tB - zoneMargin - out; }
+        else                 { x = (Math.random()-0.5)*2.2; y = bB + zoneMargin + out; }
+      }
+    }
+
+    const ex = (Math.random()-0.5) * pitcher.err * 1.8;
+    const ey = (Math.random()-0.5) * pitcher.err * 1.1;
+
+    const windOffsetX = wind.x * 0.45;
+    const windOffsetY = wind.y * 0.35;
+
+    x = x * 0.45 + ctarget.x * 0.55 + ex + windOffsetX;
+    y = y * 0.45 + ctarget.y * 0.55 + ey + windOffsetY;
+
+    const isStrike = Math.abs(x) <= eff && y >= tB-zoneMargin && y <= bB+zoneMargin;
+    const isEdge   = Math.abs(Math.abs(x)-eff)<0.22 || Math.abs(y-(tB-zoneMargin))<0.22 || Math.abs(y-(bB+zoneMargin))<0.22;
+    const isCU     = Math.hypot(x-ctarget.x, y-ctarget.y) > 0.95;
+    setCrossUp(isCU);
+
+    let fX = x, fY = y, fk = "normal";
+    
+    if (isCU) {
+      if (Math.random() < 0.12) {
+        fk = "lucky_save";
+        const pull = 0.45 * activeCatcher.fm;
+        fX = x - x * pull; 
+        fY = y + (cY - y) * pull;
+      } else {
+        const rx = x > ctarget.x ? 1 : -1;
+        const ry = y > ctarget.y ? 1 : -1;
+        const rc = 0.26 * (1.0 / activeCatcher.fm);
+        fX = x + rx * rc; 
+        fY = y + ry * rc;
+      }
+    } else if (activeCatcher.name === "桑契斯") {
+      fk = "stab_ruined";
+      const bounceX = x > 0 ? 0.24 : -0.24;
+      const bounceY = y > cY ? 0.22 : -0.22;
+      fX = x + bounceX;
+      fY = y + bounceY;
+    } else {
+      const pull = (isEdge ? 0.38 : 0.16) * activeCatcher.fm;
+      fX = x - x * pull; 
+      fY = y + (cY - y) * pull;
+    }
+
+    const speed = Math.round((type.spd[0]+Math.random()*(type.spd[1]-type.spd[0]))*pitcher.sMult);
+    const spin  = Math.round(type.spin[0]+Math.random()*(type.spin[1]-type.spin[0]));
+    const ms    = (1100 - speed * 4.2);
+
+    const pd = {
+      id: Date.now(), type, speed, spin,
+      realX: x, realY: y, framedX: fX, framedY: fY,
+      isStrike, isEdge, isCU, fluke: fk,
+      tB, bB, batter: batter.name, pitcher: pitcher.name, catcher: activeCatcher.name,
+    };
+    setPitch(pd); 
+    setBallProg(0); 
+    setBallPos({ x: 0, y: -1.2 });
+    setPhase("pitching"); 
+    phaseR.current = "pitching";
+    synth.playWhoosh();
+
+    const t0 = Date.now();
+    const fly = () => {
+      const prog = Math.min(1.0, (Date.now()-t0)/ms);
+      setBallProg(prog);
+      
+      setBallPos({
+        x: x*prog + (type.brkX/100)*Math.sin(prog*Math.PI) + wind.x*prog*0.25,
+        y: -1.2*(1-prog)+y*prog+(type.brkY/100)*Math.sin(prog*Math.PI) + wind.y*prog*0.25,
+      });
+
+      if (prog < 1.0) { 
+        requestAnimationFrame(fly); 
+        return; 
+      }
+      
+      resolveBatterSwing(pd);
+    };
+    requestAnimationFrame(fly);
+  };
+
+  const resolveBatterSwing = (pitchData) => {
+    synth.playPop();
+    decisionT.current = Date.now();
+    setPhase("decision"); 
+    phaseR.current = "decision";
+    setLocked(false); 
+    lockedR.current = false;
+    setZoneHidden(true); 
+    
+    let msg = "⚾ 請觀察捕手接球點與【手套拖曳位移】，判定好球 (S) 或壞球 (B)。";
+    if (pitchData.catcher === "莫里納") msg = "⚾ 頂級防守！莫里納正在將邊界球「揉拉」進好球帶，注意最初落點！";
+    else if (pitchData.catcher === "桑契斯") msg = "⚾ 桑契斯接球僵硬！手套反震彈出，請勿被欺騙！";
+    setFb({ text: msg, type: "info" });
+  };
+
+  /* ⚖️ 判決套用與計算 */
+  const applyCall = (isCorrect, callLabel, p, ms, precisionStr) => {
+    setZoneHidden(false);
+
+    inningPitchesCount.current += 1;
+
+    if (activeExam !== "free") {
+      const nextPitches = examPitches + 1;
+      const nextCorrect = isCorrect ? examCorrect + 1 : examCorrect;
+      setExamPitches(nextPitches);
+      setExamCorrect(nextCorrect);
+
+      if (nextPitches >= 10) {
+        const required = EXAMS_LIST.find(e => e.id === activeExam)?.target || 8;
+        const passed = nextCorrect >= required;
+        setTimeout(() => {
+          setShowExamResult({ passed, correct: nextCorrect, total: 10, examId: activeExam });
+          if (passed) {
+            setUnlockedCerts(prev => {
+              if (prev.includes(activeExam)) return prev;
+              return [...prev, activeExam];
+            });
+            // 解鎖對應成就
+            unlockAchievement(activeExam);
+            synth.playLevelUp();
+          } else {
+            synth.playBuzzer();
+          }
+        }, 1200);
+      }
+    }
+
+    let isConsistent = true;
+    if (miscallsR.current > 0 && zVerts.length >= 4) {
+      const inSubj = pointInPolygon(p.realX, p.realY, zVerts);
+      if (callLabel === "BALL" && inSubj) {
+        isConsistent = false;
+        setInconsistentCount(c => c + 1);
+      }
+    }
+
+    let xpD = 0;
+    let favorDelta = 0;
+
+    if (isCorrect) {
+      inningCorrectCalls.current += 1;
+      xpD = p.isEdge ? 30 : 12;
+      
+      if (precisionStr === "PERFECT 完美時機") {
+        xpD += 8;
+      }
+
+      const nextStreak = streakR.current + 1;
+      setStreak(nextStreak);
+      streakR.current = nextStreak;
+      const nextCombo = Math.min(3.0, 1.0 + (nextStreak * 0.1));
+      setCombo(nextCombo);
+
+      xpD = Math.round(xpD * nextCombo);
+
+      if (nextStreak >= 10) {
+        unlockAchievement("perfect_10");
+      }
+
+      setRep(r => Math.min(100, r + 4));
+      if (nextStreak > bestStreak) setBestStreak(nextStreak);
+      speak(p.isStrike ? "Strike!" : "Ball!", muted);
+
+      favorDelta = p.isEdge ? 8 : 4;
+      synth.playCheer();
+    } else {
+      setStreak(0);
+      streakR.current = 0;
+      setCombo(1.0);
+
+      xpD = p.isEdge ? -6 : -25 - (!isConsistent ? 10 : 0);
+      setRep(r => Math.max(0, r - (p.isEdge ? 6 : 16) - (!isConsistent ? 10 : 0)));
+      
+      if (!p.isEdge) warpZone(p);
+      speak("Incorrect call!", muted);
+
+      const isHomeBatter = !isTopR.current;
+      let loss = ((isHomeBatter && p.isStrike && callLabel === "BALL") || (!isHomeBatter && !p.isStrike && callLabel === "STRIKE")) ? -18 : -8;
+      
+      favorDelta = loss;
+      if (loss <= -10) {
+        setScreenShake(true); 
+        setTimeout(() => setScreenShake(false), 500);
+        synth.playBoo();
+      }
+    }
+
+    inningXpEarned.current += xpD;
+    setCrowdFavor(f => Math.max(0, Math.min(100, f + favorDelta)));
+    setXp(prev => Math.max(0, prev + xpD));
+
+    const entry = { ...p, called: callLabel, isCorrect, xpD, consist: isConsistent, precision: precisionStr };
+    setHistory(prev => [entry, ...prev]);
+
+    const consistMsg = !isConsistent ? " ⚠️ 尺度不一！" : "";
+    const mainMsg = isCorrect
+      ? `✅ 精確！【${p.isStrike?"好球":"壞球"}】${consistMsg} (${precisionStr})`
+      : `❌ 誤判！實際為【${p.isStrike?"好球":"壞球"}】${consistMsg}`;
+    setFb({ text: mainMsg, type: isCorrect ? "good" : "bad" });
+
+    if (callLabel === "STRIKE") {
+      inningStrikesCalled.current += 1;
+      if (strikesR.current >= 2) {
+        doStrikeout();
+      } else {
+        const ns = strikesR.current + 1; 
+        setStrikes(ns); 
+        strikesR.current = ns;
+      }
+    } else {
+      inningBallsCalled.current += 1;
+      if (ballsR.current >= 3) {
+        doWalk();
+      } else {
+        const nb = ballsR.current + 1; 
+        setBalls(nb); 
+        ballsR.current = nb;
+      }
+    }
+
+    setPhase("outcome"); 
+    phaseR.current = "outcome";
+    setTimeout(() => {
+      setPitch(null);
+      setPhase("ready"); 
+      phaseR.current = "ready";
+      setLocked(false);  
+      lockedR.current = false;
+    }, 1900);
+  };
+
+  const triggerCall = (action) => {
+    if (phaseR.current !== "decision" || lockedR.current) return;
+    setLocked(true); 
+    lockedR.current = true;
+
+    const ms = decisionT.current ? Date.now() - decisionT.current : 0;
+    setReactionMs(ms);
+
+    const callLabel  = action === "strike_action" ? "STRIKE" : "BALL";
+    const isCorrect  = (action === "strike_action") === pitch.isStrike;
+    setRecent(prev => [...prev.slice(-3), pitch]);
+
+    let precisionStr = "NICE CALL";
+    if (ms >= 150 && ms <= 450) {
+      precisionStr = "PERFECT 完美時機";
+    } else if (ms > 1000) {
+      precisionStr = "LATE 判定遲疑";
+    }
+
+    setActiveCallEffect({
+      type: callLabel,
+      precision: precisionStr,
+      isCorrect: isCorrect
+    });
+
+    setTimeout(() => {
+      setActiveCallEffect(null);
+    }, 1500);
+
+    const challTeam = action === "strike_action"
+      ? (isTopR.current ? "away" : "home")
+      : (isTopR.current ? "home" : "away");
+    const chLeft = challTeam === "away" ? awayCh : homeCh;
+    
+    const chProb = chLeft > 0 ? (!isCorrect ? 0.40 : pitch.isEdge ? 0.05 : 0) : 0;
+
+    if (Math.random() < chProb) {
+      const who = action === "strike_action" ? `打者 ${batter.name}` : `捕手 ${catcher.name}`;
+      setChallenge({ call: action, callLabel, isCorrect, ev: pitch, challTeam });
+      setAbsP(0); 
+      setAbsComplete(false);
+      absCompleteR.current = false;
+      setAbsVerdict(false); 
+      absVerdictR.current = false;
+      setPhase("challenge"); 
+      phaseR.current = "challenge";
+      setLocked(false); 
+      lockedR.current = false;
+      synth.playWhistle();
+      setFb({ text: `🧢 ${who} 啟動 ABS 鷹眼挑戰！`, type: "info" });
+      speak("ABS Challenge!", muted);
+    } else {
+      applyCall(isCorrect, callLabel, pitch, ms, precisionStr);
+    }
+  };
+  triggerCallR.current = triggerCall;
+
+  const confirmChallenge = () => {
+    if (!challenge || !absComplete) return;
+    const { isCorrect, callLabel, ev, challTeam } = challenge;
+
+    setAbsVerdict(true);
+    absVerdictR.current = true;
+    
+    ev.isStrike ? synth.playAbsOk() : synth.playAbsFail();
+    speak(ev.isStrike ? "Strike" : "Ball", muted);
+
+    setTimeout(() => {
+      if (isCorrect) {
+        if (challTeam === "away") setAwayCh(c => Math.max(0, c-1));
+        else                      setHomeCh(c => Math.max(0, c-1));
+        setFb({ text: "❌ 挑戰失敗！維持原判。", type: "bad" });
+        synth.playBuzzer();
+        setTimeout(() => { 
+          applyCall(true, callLabel, ev, 500, "AFTER REVIEW"); 
+          setChallenge(null); 
+          setAbsComplete(false);
+          setAbsVerdict(false);
+        }, 900);
+      } else {
+        const overturnedLabel = callLabel === "STRIKE" ? "BALL" : "STRIKE";
+        setFb({ text: "✅ 挑戰成功！判決遭推翻，改判。", type: "good" });
+        synth.playWhistle();
+        setTimeout(() => { 
+          applyCall(true, overturnedLabel, ev, 500, "AFTER REVIEW"); 
+          setChallenge(null); 
+          setAbsComplete(false);
+          setAbsVerdict(false);
+        }, 900);
+      }
+    }, 1600); 
+  };
+  confirmChalR.current = confirmChallenge;
+
+  return (
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none overflow-x-hidden">
+      <style>{`
+        @keyframes gloveBreath { 0%,100%{transform:translateY(0) rotate(0deg)} 50%{transform:translateY(1.2px) rotate(.35deg)} }
+        @keyframes tremor { 0%,100%{transform:translate(0,0)} 25%{transform:translate(-.3px,.3px)} 75%{transform:translate(.3px,-.3px)} }
+        .glove-anim { animation: gloveBreath 3.4s ease-in-out infinite, tremor .11s linear infinite; transform-origin:center; }
+        @keyframes fadeIn  { from{opacity:0;transform:translateY(-6px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes ping2   { 0%{transform:scale(1);opacity:1} 80%{transform:scale(1.9);opacity:0} 100%{opacity:0} }
+        .fade-in  { animation: fadeIn .3s ease; }
+        .ping2    { animation: ping2 .9s cubic-bezier(0,0,.2,1) infinite; }
+        .sl-grid  { background-image:linear-gradient(rgba(56,189,248,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(56,189,248,.06) 1px,transparent 1px); background-size:20px 20px; }
+        
+        @keyframes customShake {
+          0%, 100% { transform: translate3d(0, 0, 0); }
+          10%, 30%, 50%, 70%, 90% { transform: translate3d(-3px, 1px, 0); }
+          20%, 40%, 60%, 80% { transform: translate3d(3px, -1px, 0); }
+        }
+        .shake-active {
+          animation: customShake 0.4s cubic-bezier(.36,.07,.19,.97) both;
+          backface-visibility: hidden;
+          perspective: 1000px;
+        }
+
+        @keyframes callPopUp {
+          0% { transform: scale(0.3) rotate(-20deg); opacity: 0; }
+          40% { transform: scale(1.2) rotate(8deg); opacity: 1; }
+          75% { transform: scale(1.0) rotate(0deg); opacity: 1; }
+          100% { transform: scale(0.8) translateY(-15px); opacity: 0; }
+        }
+        .call-pop-anim { animation: callPopUp 1.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+      `}</style>
+
+      {/* ══ HEADER ══ */}
+      <header className="border-b border-slate-800 bg-slate-900/95 sticky top-0 z-50 backdrop-blur shadow-lg">
+        <div className="max-w-7xl mx-auto px-4 py-2.5 flex flex-wrap items-center gap-3 justify-between">
+          
+          {/* Logo */}
+          <div className="flex items-center gap-2.5">
+            <span className="text-2xl">⚖️</span>
+            <div>
+              <p className="text-sm font-black bg-gradient-to-r from-amber-400 to-cyan-400 bg-clip-text text-transparent tracking-wider uppercase leading-none">Umpire Pro 8.8</p>
+              <p className="text-[9px] text-slate-500 font-mono">MLB ABS Close-Up & Dynamic Pitch System</p>
+            </div>
+          </div>
+
+          {/* Career XP bar */}
+          {screen === "live" && (
+            <div className="flex-1 max-w-xs min-w-[120px]">
+              <div className="flex justify-between text-[9px] text-slate-400 mb-1">
+                <span className="font-bold text-amber-400">{curLvl.title}</span>
+                <span>{xp.toLocaleString()} XP</span>
+              </div>
+              <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-amber-500 to-cyan-500 rounded-full transition-all duration-700"
+                     style={{ width: `${xpFrac * 100}%` }} />
+              </div>
+            </div>
+          )}
+
+          {/* Combo Multiplier indicator */}
+          {screen === "live" && combo > 1.0 && (
+            <div className="bg-amber-500/10 border border-amber-500/40 px-2.5 py-0.5 rounded-full text-[10px] font-black text-amber-400 animate-pulse font-mono">
+              COMBO {combo.toFixed(1)}x
+            </div>
+          )}
+
+          {/* Notification Alert */}
+          {notif && (
+            <div className="fade-in text-[11px] font-bold text-amber-400 bg-amber-950/60 border border-amber-700/50 px-3 py-1 rounded-lg">
+              {notif}
+            </div>
+          )}
+
+          {/* Controls */}
+          <div className="flex items-center gap-1.5">
+            {screen === "live" && (
+              <>
+                {["game", "scorecard", "settings"].map(t => (
+                  <button key={t} onClick={() => setTab(t)}
+                    className={`px-3 py-1 rounded-lg text-[11px] font-bold transition ${tab === t ? "bg-amber-500 text-slate-950" : "bg-slate-800 text-slate-300 hover:bg-slate-700"}`}>
+                    {t === "game" ? "⚾ 實戰" : t === "scorecard" ? "📊 數據卡" : "⚙️ 考場/設定"}
+                  </button>
+                ))}
+              </>
+            )}
+            <button onClick={() => setMuted(m => !m)}
+              className={`p-1.5 rounded-lg border text-xs ${muted ? "border-red-800 bg-red-950 text-red-400" : "border-slate-700 text-slate-400 hover:bg-slate-800"}`}>
+              {muted ? "🔇" : "🔊"}
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* ══ MAIN WORKSPACE ══ */}
+      {screen === "menu" ? (
+        <div className="flex-1 flex items-center justify-center p-4">
+          <div className="max-w-xl w-full bg-slate-900 border border-slate-800 p-6 md:p-8 rounded-2xl shadow-2xl space-y-6">
+            <div className="text-center">
+              <div className="text-6xl mb-3 animate-bounce">⚖️</div>
+              <h1 className="text-3xl font-black text-white tracking-wide bg-gradient-to-r from-amber-400 to-cyan-400 bg-clip-text text-transparent">Umpire Pro 8.8 終極特訓版</h1>
+              <p className="text-xs text-slate-400 mt-2 font-mono">無輔助盲區判定 × 捕手延時物理拉幀 × ABS 電子挑戰</p>
+            </div>
+            
+            {/* 🎓 主審特訓與學院考核 Drill Selection */}
+            <div className="space-y-2 text-left">
+              <p className="text-[11px] font-bold text-slate-400 font-mono uppercase tracking-wider">🌟 選擇您的特訓/學院證照考核模式：</p>
+              <div className="flex flex-col gap-2">
+                {EXAMS_LIST.map(e => {
+                  const unlocked = unlockedCerts.includes(e.id);
+                  return (
+                    <button key={e.id} onClick={() => setActiveExam(e.id)}
+                      className={`p-3 rounded-xl border text-left text-xs transition duration-200 relative overflow-hidden ${activeExam === e.id ? "bg-amber-950/40 border-amber-500 text-amber-300 shadow-md shadow-amber-950/50" : "bg-slate-950/80 border-slate-800 text-slate-400 hover:border-slate-700"}`}>
+                      {unlocked && (
+                        <div className="absolute top-1 right-1 bg-amber-500 text-slate-950 text-[8px] font-black px-1.5 py-0.2 rounded-full uppercase tracking-wider animate-pulse">
+                          🎓 已取得證照
+                        </div>
+                      )}
+                      <div className="font-bold flex items-center gap-1.5 text-slate-200 mb-1">
+                        <span>{e.icon || "🎓"}</span>
+                        <span>{e.name}</span>
+                        {e.type === "exam" && <span className="text-[9px] bg-red-950 text-red-400 border border-red-900/60 px-1 rounded">證照考 (10球需對{e.target}球)</span>}
+                      </div>
+                      <span className="text-slate-500 font-mono text-[10px] leading-relaxed block">{e.desc}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <button onClick={() => {
+              setScreen("live");
+              setExamPitches(0);
+              setExamCorrect(0);
+              setShowExamResult(null);
+            }}
+              className="w-full py-4 bg-gradient-to-r from-amber-500 to-cyan-500 text-slate-950 font-black rounded-xl shadow-lg hover:brightness-110 active:scale-[0.99] transition text-sm">
+              開始執法與接受考驗 ➜
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex-1 max-w-7xl w-full mx-auto p-3 flex flex-col gap-3">
+
+          {/* 🎓 考核結果結算 Modal Overlay */}
+          {showExamResult && (
+            <div className="fixed inset-0 z-[100] bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 fade-in">
+              <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl text-center space-y-4">
+                <p className="text-6xl">{showExamResult.passed ? "🏆" : "❌"}</p>
+                <h2 className="text-2xl font-black text-amber-400">
+                  {EXAMS_LIST.find(e => e.id === showExamResult.examId)?.name} 結算
+                </h2>
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                  <p className="text-xs text-slate-400 uppercase tracking-widest font-mono">考核判定成果</p>
+                  <p className="text-4xl font-mono font-black text-slate-100">
+                    {showExamResult.correct} <span className="text-lg text-slate-500">/ {showExamResult.total} 正確</span>
+                  </p>
+                  <p className="text-xs text-slate-500 font-mono">通過門檻需要至少 8 顆球正確</p>
+                </div>
+
+                <div className={`p-3 rounded-lg text-xs leading-relaxed ${showExamResult.passed ? "bg-emerald-950/40 border border-emerald-800 text-emerald-400" : "bg-red-950/40 border border-red-900 text-red-400"}`}>
+                  {showExamResult.passed 
+                    ? "恭喜！您成功展現了大聯盟主審級的超強動態視力與抗干擾能力！永久解鎖並核發了該專業執照！" 
+                    : "考核失敗。捕手的框球位移以及變化球軌跡對您的大腦造成了干擾，調整心態後歡迎再次挑戰！"}
+                </div>
+
+                <div className="flex gap-2">
+                  <button onClick={() => {
+                    setShowExamResult(null);
+                    setExamPitches(0);
+                    setExamCorrect(0);
+                  }} className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl transition text-xs">
+                    重新考一次
+                  </button>
+                  <button onClick={() => {
+                    setShowExamResult(null);
+                    setScreen("menu");
+                  }} className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black rounded-xl transition text-xs">
+                    返回學院選單
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Scoreboard Info Panel */}
+          {tab !== "settings" && (
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 grid grid-cols-12 gap-3 items-center shadow-md">
+              
+              {/* Diamond Bases */}
+              <div className="col-span-3 sm:col-span-2 flex justify-center">
+                <div className="relative w-11 h-11 rotate-45 border-slate-800 border-[1.5px] rounded-sm bg-slate-950/40 p-1 flex items-center justify-center">
+                  {[[runners[1], "top-0 right-0"], [runners[0], "bottom-0 right-0"], [runners[2], "top-0 left-0"]].map(([on, pos], i) => (
+                    <div key={i} className={`absolute w-3.5 h-3.5 rounded-sm transition-all duration-300 ${pos} ${on ? "bg-amber-400 shadow-amber-400/50 shadow" : "bg-slate-800/80 border border-slate-700/60"}`} />
+                  ))}
+                  <div className="w-2.5 h-2.5 bg-slate-700/40 rotate-45" title="本壘板" />
+                </div>
+              </div>
+
+              {/* R/H Score info */}
+              <div className="col-span-5 sm:col-span-4 flex items-center justify-around font-mono">
+                <div className="text-center">
+                  <p className="text-[9px] text-slate-500 font-bold tracking-wider">AWAY</p>
+                  <p className="text-2xl font-black text-cyan-400 leading-none">{awayScore}</p>
+                  <div className="flex gap-0.5 mt-1 justify-center">
+                    {[0, 1, 2].map(i => (
+                      <div key={i} className={`w-2.5 h-1 rounded-sm ${i < awayCh ? "bg-emerald-500" : "bg-slate-800"}`} />
+                    ))}
+                  </div>
+                </div>
+                <div className="text-center">
+                  <p className="text-[10px] text-slate-600 font-bold">{isTop ? "▲" : "▼"}</p>
+                  <p className="text-md font-bold text-slate-500 leading-none">{inning}局</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-[9px] text-slate-500 font-bold tracking-wider">HOME</p>
+                  <p className="text-2xl font-black text-amber-400 leading-tight">{homeScore}</p>
+                  <div className="flex gap-0.5 mt-1 justify-center">
+                    {[0, 1, 2].map(i => (
+                      <div key={i} className={`w-2.5 h-1 rounded-sm ${i < homeCh ? "bg-emerald-500" : "bg-slate-800"}`} />
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Strike / Ball / Out counts */}
+              <div className="col-span-4 sm:col-span-3 flex flex-col gap-1 justify-center text-xs font-mono px-2">
+                {[
+                  { label: "STRIKES", value: strikes, max: 2, activeColor: "bg-amber-400 shadow-amber-400/50" },
+                  { label: "BALLS", value: balls, max: 3, activeColor: "bg-emerald-400 shadow-emerald-400/50" },
+                  { label: "OUTS", value: outs, max: 2, activeColor: "bg-rose-500 shadow-rose-500/50" }
+                ].map(({ label, value, max, activeColor }) => (
+                  <div key={label} className="flex items-center gap-2">
+                    <span className="text-[9px] text-slate-500 font-bold w-12">{label}</span>
+                    <div className="flex gap-1.5">
+                      {Array.from({ length: max }).map((_, i) => (
+                        <div key={i} className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${i < value ? `${activeColor} shadow-md` : "bg-slate-800 border border-slate-700/40"}`} />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Live Game Accuracy Stats */}
+              <div className="col-span-12 sm:col-span-3 font-mono text-[10px] border-t sm:border-t-0 sm:border-l border-slate-800 pt-2 sm:pt-0 sm:pl-4 space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">執法正確率</span>
+                  <span className={`font-bold ${acc >= 85 ? "text-emerald-400" : acc >= 70 ? "text-amber-400" : "text-rose-400"}`}>{acc}%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">球場好感度</span>
+                  <span className={`font-bold ${crowdFavor >= 70 ? "text-emerald-400" : crowdFavor >= 40 ? "text-amber-400 animate-pulse" : "text-rose-500"}`}>{crowdFavor}%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">大腦心智帶</span>
+                  <span className="font-bold text-rose-400">{zVerts.length}邊形</span>
+                </div>
+                {streak >= 3 && (
+                  <div className={`font-bold animate-pulse text-right ${streakIndicatorColor}`}>
+                    🔥 連續正確 {streak} 次 (Combo {combo.toFixed(1)}x)
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── 🎓 學院考核 HUD 指示器 ── */}
+          {activeExam !== "free" && tab === "game" && (
+            <div className="bg-gradient-to-r from-red-950/80 to-slate-900 border border-red-900/60 rounded-xl p-3 flex flex-wrap items-center justify-between shadow-lg font-mono">
+              <div className="flex items-center gap-2">
+                <span className="text-xl animate-pulse">🎓</span>
+                <div>
+                  <p className="text-xs font-bold text-slate-100">{EXAMS_LIST.find(e => e.id === activeExam)?.name}</p>
+                  <p className="text-[10px] text-slate-400">大聯盟證照學院認證考核：必須完成 10 球並答對至少 8 球</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] text-slate-400">目前進度</p>
+                <p className="text-sm font-black text-amber-400">{examPitches} / 10 <span className="text-xs text-slate-400">(答對 {examCorrect})</span></p>
+              </div>
+            </div>
+          )}
+
+          {/* ── GAME TAB VIEW ── */}
+          {tab === "game" && (
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 items-start relative">
+
+              {/* 🏆 半局結算報告 Overlay */}
+              {showInningReport && (
+                <div className="absolute inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 fade-in">
+                  <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl text-center space-y-4">
+                    <p className="text-4xl">📊</p>
+                    <h2 className="text-xl font-black text-amber-400">第 {inning} 局 {isTop ? "上半" : "下半"} 執法成果</h2>
+                    
+                    <div className="grid grid-cols-2 gap-2 text-xs font-mono text-left">
+                      <div className="bg-slate-950 p-2.5 rounded border border-slate-800/80">
+                        <p className="text-slate-500 font-bold">執法投球數</p>
+                        <p className="text-lg font-bold text-slate-100">{inningReportData.pitchesCount} 球</p>
+                      </div>
+                      <div className="bg-slate-950 p-2.5 rounded border border-slate-800/80">
+                        <p className="text-slate-500 font-bold">判定正確數</p>
+                        <p className="text-lg font-bold text-emerald-400">{inningReportData.correctCalls} 次</p>
+                      </div>
+                      <div className="bg-slate-950 p-2.5 rounded border border-slate-800/80">
+                        <p className="text-slate-500 font-bold">半局正確率</p>
+                        <p className="text-lg font-bold text-cyan-400">
+                          {inningReportData.pitchesCount ? Math.round((inningReportData.correctCalls / inningReportData.pitchesCount) * 100) : 100}%
+                        </p>
+                      </div>
+                      <div className="bg-slate-950 p-2.5 rounded border border-slate-800/80">
+                        <p className="text-slate-500 font-bold">半局獲得 XP</p>
+                        <p className="text-lg font-bold text-amber-400">+{inningReportData.inningXp} XP</p>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-950/60 p-3 rounded-lg border border-slate-800 text-xs text-slate-400 font-mono">
+                      <p className="font-bold text-slate-300 mb-1">📢 主場觀眾情緒波動</p>
+                      <p>
+                        此半局觀眾好感度轉變為：
+                        <span className={`font-bold ml-1 ${inningReportData.hostilityDelta >= 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                          {inningReportData.hostilityDelta >= 0 ? `+${inningReportData.hostilityDelta}%` : `${inningReportData.hostilityDelta}%`}
+                        </span>
+                      </p>
+                    </div>
+
+                    <button onClick={closeInningReportAndContinue}
+                      className="w-full py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black rounded-xl shadow-lg transition active:scale-[0.98]">
+                      進入下個半局攻守交換
+                    </button>
+                  </div>
+                </div>
+              )}
+              
+              {/* Left Column: Personnel / Active Pitch */}
+              <div className="lg:col-span-3 flex flex-col gap-3">
+                
+                {/* Matchup Data */}
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-3 shadow-lg">
+                  <p className="text-[10px] font-bold text-slate-400 border-b border-slate-800 pb-1.5 uppercase tracking-wider">局勢、氣流與物理參數</p>
+                  
+                  {/* 風向指示器 */}
+                  <div className="bg-blue-950/40 rounded-lg p-2 border border-blue-900/40 flex justify-between items-center text-[11px] font-mono">
+                    <span className="text-blue-400 font-bold">🏟️ 即時風向影響</span>
+                    <span className="text-slate-200 font-bold flex items-center gap-1 animate-pulse">
+                      {wind.icon} {wind.name}
+                    </span>
+                  </div>
+
+                  {[
+                    ["🔥 投手 (PITCHER)", pitcher.name, `偏差 ±${pitcher.err.toFixed(2)}`, "text-red-400"],
+                    ["🛡️ 捕手 (CATCHER)", catcher.name, `防守 Fram: ${catcher.fm}`, catcher.cls],
+                    ["⚔️ 打者 (BATTER)", `${batter.name} (${batter.stance === "L" ? "左打" : "右打"})`, `選幅 Eye: ${batter.eye}`, "text-cyan-400"],
+                  ].map(([label, name, desc, cls]) => (
+                    <div key={label} className="space-y-0.5">
+                      <p className="text-[9px] text-slate-500 font-bold">{label}</p>
+                      <div className="bg-slate-950/80 rounded-lg p-2 border border-slate-800/80 flex justify-between items-center text-[11px] font-bold">
+                        <span className="text-slate-100">{name}</span>
+                        <span className={`text-[10px] font-mono ${cls}`}>{desc}</span>
+                      </div>
+                    </div>
+                  ))}
+                  <p className="text-[9px] text-slate-500 italic mt-1">{catcher.desc}</p>
+                </div>
+
+                {/* Live Pitch Telemetry */}
+                {pitch && (
+                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-2.5 shadow-lg fade-in">
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">彈道實時遙測</p>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded border font-mono"
+                        style={{ color: pitch.type.color, borderColor: pitch.type.color + "44", background: pitch.type.color + "18" }}>
+                        {pitch.type.abbr}
+                      </span>
+                      <span className="text-xs font-bold text-slate-200">{pitch.type.name}</span>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-1.5 text-[10px] font-mono">
+                      {[
+                        ["球速", `${pitch.speed} km/h`, "text-amber-400"],
+                        ["轉速", `${pitch.spin.toLocaleString()} rpm`, "text-purple-400"],
+                        ["水平位移", `${Math.abs(pitch.type.brkX)} cm`, "text-cyan-400"],
+                        ["垂直下墜", `${Math.abs(pitch.type.brkY)} cm`, "text-emerald-400"],
+                      ].map(([k, v, cls]) => (
+                        <div key={k} className="bg-slate-950 rounded-lg p-2 border border-slate-800/60">
+                          <p className="text-slate-500 text-[8px] font-bold">{k}</p>
+                          <p className={`font-black ${cls}`}>{v}</p>
+                        </div>
+                      ))}
+                    </div>
+                    
+                    {reactionMs && phase === "outcome" && !isSwingTriggered && (
+                      <div className="text-center text-[10px] font-mono bg-slate-950/40 p-1 rounded-md border border-slate-800/50">
+                        <span className="text-slate-500">您的反應時間：</span>
+                        <span className={`font-black ${reactionMs < 600 ? "text-emerald-400" : reactionMs < 1200 ? "text-amber-400" : "text-rose-400"}`}>
+                          {reactionMs} ms
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Warp Alarm Box */}
+                {miscalls > 0 && (
+                  <div className="bg-rose-950/30 border border-rose-900/40 rounded-xl p-3 text-[10px] text-rose-300 font-mono shadow-inner">
+                    ⚠️ 偵測到累計 <strong className="text-rose-400">{miscalls} 次</strong> 判決失誤。
+                    您的大腦主觀好球帶已在潛意識變形為 <strong className="text-rose-400">{zVerts.length} 邊形</strong>。請極力維持一致性判定！
+                  </div>
+                )}
+              </div>
+
+              {/* Center Canvas: Pitching Simulator viewport */}
+              <div className="lg:col-span-6 flex flex-col gap-3">
+                <div className={`relative bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col items-center justify-center ${screenShake ? "shake-active" : ""}`} style={{ aspectRatio: "15/17" }}>
+
+                  {/* 🚨 Hawk-Eye ABS Challenge Simulation Overlay */}
+                  {phase === "challenge" && challenge && (
+                    <div className="absolute inset-0 z-50 bg-[#050a14] flex flex-col p-4 fade-in">
+                      <div className="flex justify-between items-center mb-2 pb-2 border-b border-slate-800/80">
+                        <div className="flex items-center gap-2 text-[10px] font-black text-rose-500 tracking-widest font-mono">
+                          <div className="w-2.5 h-2.5 bg-rose-500 rounded-full ping2"/> ABS TRACKING SYSTEM
+                        </div>
+                        <span className="text-cyan-400 text-[9px] font-mono uppercase">
+                          {absComplete ? "🛰️ TRACKING COMPLETE" : "CALCULATING TANGENT"}
+                        </span>
+                      </div>
+
+                      <div className="flex-1 relative sl-grid bg-black border border-slate-800/80 rounded-xl overflow-hidden flex items-center justify-center">
+                        <AbsRenderer ev={challenge.ev} progress={absP} batter={batter} zoneMargin={zoneMargin} showVerdict={absVerdict} />
+                        
+                        {absVerdict && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/65 backdrop-blur-xs z-20 fade-in">
+                            <div className={`text-4xl sm:text-5xl font-black border-4 p-3 -rotate-12 shadow-2xl tracking-widest
+                              ${challenge.ev.isStrike ? "text-emerald-500 border-emerald-500 bg-emerald-950/20" : "text-blue-500 border-blue-500 bg-blue-950/20"}`}>
+                              {challenge.ev.isStrike ? "STRIKE" : "BALL"}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Laser beam */}
+                        {!absComplete && (
+                          <div className="absolute left-0 right-0 h-0.5 bg-red-500/80 pointer-events-none"
+                            style={{ top: `${absP * 100}%`, boxShadow: "0 0 10px #ef4444" }}/>
+                        )}
+                      </div>
+
+                      <div className="mt-2.5 flex flex-wrap gap-2 justify-between items-center bg-slate-900 p-2.5 rounded-lg border border-slate-800">
+                        <div className="text-[10px] text-slate-400 font-mono">
+                          挑戰方：<span className="text-slate-200 font-bold">{challenge.challTeam === "away" ? "客隊 AWAY" : "主隊 HOME"}</span> 
+                          {' · '} 原判：<span className={challenge.callLabel === "STRIKE" ? "text-amber-400 font-bold" : "text-emerald-400 font-bold"}>{challenge.callLabel}</span>
+                        </div>
+                        {absComplete && !absVerdict && (
+                          <button onClick={confirmChallenge}
+                            className="py-1.5 px-4 bg-amber-400 hover:bg-amber-300 text-slate-950 font-black rounded-lg text-[11px] transition shadow-lg animate-pulse font-mono h-8 flex items-center">
+                            🛎️ 進行電子宣判 (Space / Enter)
+                          </button>
+                        )}
+                        {absVerdict && (
+                          <span className="text-[10px] text-emerald-400 font-mono animate-pulse">
+                            📢 系統正在廣播最終電子判決結果...
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 📣 動態裁決特效層 */}
+                  {activeCallEffect && (
+                    <div className="absolute inset-0 pointer-events-none z-40 flex flex-col items-center justify-center bg-slate-950/10 select-none">
+                      <div className="call-pop-anim flex flex-col items-center justify-center">
+                        <p className={`text-5xl font-black tracking-widest select-none 
+                          ${activeCallEffect.type === "STRIKE" ? "text-amber-400" 
+                          : activeCallEffect.type === "BALL" ? "text-sky-400" 
+                          : "text-slate-300"}`}
+                           style={{ textShadow: "0 0 20px rgba(0,0,0,0.8), 0 0 35px currentColor" }}>
+                          {activeCallEffect.type}!
+                        </p>
+                        <p className={`text-[10px] font-mono mt-1 px-3 py-0.5 rounded border-2 font-black bg-slate-900/90 text-slate-200 border-slate-700`}>
+                          {activeCallEffect.precision}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Standard Interactive Pitch Zone */}
+                  {phase !== "challenge" && (
+                    <div className="w-full h-full relative">
+                      <Zone
+                        pitch={pitch} 
+                        revealed={phase === "outcome"}
+                        ballPos={ballPos} 
+                        ballProg={ballProg}
+                        batter={batter} 
+                        catcher={catcher}
+                        phase={phase} 
+                        zoneHidden={zoneHidden}
+                        zoneMargin={zoneMargin} 
+                        ctarget={ctarget}
+                        crossUp={crossUp} 
+                        fluke={fluke}
+                        fadeP={fadeP} 
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Control Action Buttons */}
+                <div className="flex flex-col gap-2 w-full max-w-full">
+                  {phase === "ready" && (
+                    <div className="flex gap-2 w-full">
+                      <button onClick={() => setScreen("menu")}
+                        className="py-3 px-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl shadow transition">
+                        🚪 學院選單
+                      </button>
+                      <button onClick={startPitch}
+                        className="flex-1 h-[52px] bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-sm rounded-xl shadow-lg active:scale-95 transition uppercase tracking-widest flex items-center justify-center">
+                        ⚾ 呼叫投球 (Space / Enter)
+                      </button>
+                    </div>
+                  )}
+                  {phase === "ready_fading" && (
+                    <div className="h-[52px] bg-slate-900 border border-amber-500/20 text-amber-400 rounded-xl text-xs text-center font-bold animate-pulse tracking-wide font-mono flex items-center justify-center">
+                      ⚡ 捕手正向下移開手套以干擾視線…
+                    </div>
+                  )}
+                  {phase === "pitching" && (
+                    <div className="h-[52px] bg-slate-900 border border-slate-800 text-slate-400 rounded-xl text-xs text-center font-mono animate-pulse flex items-center justify-center">
+                      ⚾ 球體高速飛行中... 好球帶已在您宣判前安全隱形
+                    </div>
+                  )}
+                  {phase === "decision" && (
+                    <div className="grid grid-cols-2 gap-3.5">
+                      <button id="ball-btn" onClick={() => triggerCallR.current?.("ball_action")}
+                        className="h-[52px] bg-rose-700 hover:bg-rose-600 text-white font-black text-sm rounded-xl transition active:scale-95 shadow-lg flex flex-col items-center justify-center">
+                        <span className="text-[8px] font-normal opacity-70 leading-none mb-0.5">← Key B / 向左鍵</span>
+                        壞 球 (BALL)
+                      </button>
+                      <button id="strike-btn" onClick={() => triggerCallR.current?.("strike_action")}
+                        className="h-[52px] bg-emerald-600 hover:bg-emerald-500 text-white font-black text-sm rounded-xl transition active:scale-95 shadow-lg flex flex-col items-center justify-center">
+                        <span className="text-[8px] font-normal opacity-70 leading-none mb-0.5">Key S / 向右鍵 →</span>
+                        好 球 (STRIKE)
+                      </button>
+                    </div>
+                  )}
+                  {phase === "outcome" && (
+                    <div className="h-[52px] bg-slate-900 border border-slate-800 text-slate-400 rounded-xl text-xs text-center font-mono flex items-center justify-center">
+                      判定處理中... 即將進行下一球準備
+                    </div>
+                  )}
+
+                  {/* Adaptive Response Feedback Banner */}
+                  <div className={`rounded-xl py-3 px-4 border min-h-[46px] flex items-center justify-center transition shadow-md
+                    ${fb.type === "good" ? "border-emerald-800/80 bg-emerald-950/40 text-emerald-300"
+                    : fb.type === "bad"  ? "border-rose-900/80 bg-rose-950/40 text-rose-300"
+                    : fb.type === "warn" ? "border-amber-800/80 bg-amber-950/40 text-amber-300 animate-pulse"
+                    : fb.type === "pulse" ? "border-slate-700 bg-slate-900 text-slate-300 animate-pulse"
+                    : "border-slate-800/80 bg-slate-900/60 text-slate-400"}`}>
+                    <p className="text-[11px] font-bold text-center leading-relaxed font-mono">
+                      {fb.text || "💡 特訓規章：好球帶在宣判前 100% 隱形，考驗你對捕手接球點與空間感物理的直覺！"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Column: Historical Logs and XP Progression */}
+              <div className="lg:col-span-3 flex flex-col gap-3">
+                
+                {/* Micro Logs */}
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 flex-1 shadow-lg">
+                  <p className="text-[10px] font-bold text-slate-400 border-b border-slate-800 pb-1.5 mb-2 uppercase tracking-wider">最近 4 次投球彈道</p>
+                  {recent.length === 0 ? (
+                    <p className="text-[10px] text-slate-600 text-center py-10 font-mono">尚無實戰記錄</p>
+                  ) : (
+                    recent.slice().reverse().map((p, i) => (
+                      <div key={p.id} className={`mb-2 p-2 rounded-lg border ${i === 0 ? "border-slate-600 bg-slate-800/40" : "border-slate-800/50 bg-transparent"} font-mono`}>
+                        <div className="flex justify-between items-center">
+                          <span className="text-[10px] font-bold" style={{ color: p.type.color }}>{p.type.abbr} · {p.speed}k</span>
+                          <span className={`text-[10px] font-black ${p.isStrike ? "text-emerald-400" : "text-rose-400"}`}>{p.isStrike ? "● STRIKE" : "● BALL"}</span>
+                        </div>
+                        {p.fluke === "lucky_save"  && <p className="text-[8px] text-emerald-400 mt-0.5">✨ Catcher Framing (神偷拉回)</p>}
+                        {p.fluke === "stab_ruined" && <p className="text-[8px] text-rose-400 mt-0.5">⚠️ Glove Stab (接球刺拍慣性外彈)</p>}
+                        {p.isCU && p.fluke === "normal" && <p className="text-[8px] text-amber-500 mt-0.5">🚨 Cross-up (手套大幅物理晃動)</p>}
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Reputation Gauge */}
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow-lg">
+                  <div className="flex justify-between text-[10px] mb-1 font-mono">
+                    <span className="text-slate-400 font-bold">裁判執法聲譽</span>
+                    <span className={`font-black ${rep >= 80 ? "text-emerald-400" : rep >= 60 ? "text-amber-400" : "text-rose-400"}`}>{rep}%</span>
+                  </div>
+                  <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-500"
+                      style={{ width: `${rep}%`, background: rep >= 80 ? "#10b981" : rep >= 60 ? "#f59e0b" : "#ef4444" }}/>
+                  </div>
+                  <div className="mt-3 text-[10px] font-mono grid grid-cols-2 gap-2 text-center">
+                    <div className="bg-slate-950/50 p-1.5 rounded border border-slate-800">
+                      <p className="text-slate-500">生涯最佳連中</p>
+                      <p className="text-amber-400 font-black text-sm">{bestStreak}</p>
+                    </div>
+                    <div className="bg-slate-950/50 p-1.5 rounded border border-slate-800">
+                      <p className="text-slate-500">目前連續</p>
+                      <p className={`font-black text-sm ${streak >= 3 ? "text-amber-400 animate-pulse" : "text-slate-300"}`}>{streak}</p>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          )}
+
+          {/* ── SCORECARD TAB VIEW ── */}
+          {tab === "scorecard" && (
+            <div className="max-w-5xl mx-auto flex flex-col gap-4 fade-in font-mono">
+              
+              {/* Scorecard grid indicators */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {[
+                  ["整體判定正確率", `${acc}%`, acc >= 85 ? "text-emerald-400" : acc >= 70 ? "text-amber-400" : "text-rose-400"],
+                  ["主觀尺度一致性", `${consist}%`, consist >= 90 ? "text-emerald-400" : consist >= 75 ? "text-amber-400" : "text-rose-400 animate-pulse"],
+                  ["大腦主觀心智帶", `${zVerts.length} 邊形`, "text-rose-400"],
+                  ["累積判定投球數", total, "text-slate-100"],
+                ].map(([label, val, cls]) => (
+                  <div key={label} className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center shadow-md">
+                    <p className="text-[10px] text-slate-500 font-bold mb-1">{label}</p>
+                    <p className={`text-2xl font-black ${cls}`}>{val}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Achievements & Milestones Display List */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-md">
+                <p className="text-xs font-bold text-slate-300 mb-3 border-b border-slate-800 pb-2">🎖️ 生涯執法里程碑勳章 (成就解鎖)</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                  {ACHIEVEMENTS_LIST.map(a => {
+                    const unlocked = achievements.includes(a.id);
+                    return (
+                      <div key={a.id} className={`p-3 rounded-lg border transition ${unlocked ? "bg-cyan-950/20 border-cyan-500/50" : "bg-slate-950/50 border-slate-800 opacity-60"}`}>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xl">{a.icon}</span>
+                          <span className={`text-[11px] font-bold ${unlocked ? "text-cyan-400" : "text-slate-400"}`}>{a.title}</span>
+                          {unlocked && <span className="ml-auto text-[9px] bg-cyan-50 text-slate-950 font-black px-1.5 py-0.2 rounded">LOCKED IN</span>}
+                        </div>
+                        <p className="text-[9.5px] text-slate-500 leading-snug">{a.desc}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Pitch Stats chart */}
+              {statsByType.length > 0 && (
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-md">
+                  <p className="text-xs font-bold text-slate-300 mb-3 border-b border-slate-800 pb-2">📈 各球種判定分佈與準確率</p>
+                  <div className="space-y-3">
+                    {statsByType.map(t => {
+                      const percentage = t.total ? Math.round(t.correct / t.total * 100) : 0;
+                      return (
+                        <div key={t.abbr} className="flex items-center gap-3">
+                          <span className="text-[10px] font-black w-8 text-center px-1 rounded" style={{ color: t.color, backgroundColor: t.color + "15" }}>{t.abbr}</span>
+                          <span className="text-[10px] text-slate-400 w-20 truncate">{t.name}</span>
+                          <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden">
+                            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${percentage}%`, backgroundColor: t.color }}/>
+                          </div>
+                          <span className="text-[10px] font-bold w-16 text-right" style={{ color: t.color }}>{percentage}% ({t.correct}/{t.total})</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Heat Map and Subjective Graph */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-md">
+                <p className="text-xs font-bold text-slate-300 mb-1.5 border-b border-slate-800 pb-2">📍 大腦主觀好球帶裂變散佈圖</p>
+                <p className="text-[10px] text-slate-500 mb-3">白色虛線框=大聯盟官方好球帶。<span className="text-rose-500 font-bold">紅色多邊形</span>=因誤判導致大腦主觀認知扭曲後的「心智好球帶」。<span className="text-amber-400">● 橘點</span>=判定不一致球。</p>
+
+                <div className="relative bg-slate-950 rounded-xl overflow-hidden border border-slate-800" style={{ aspectRatio: "3/1" }}>
+                  <svg className="absolute inset-0 w-full h-full" viewBox="0 0 600 200" preserveAspectRatio="xMidYMid meet">
+                    {/* Official zone */}
+                    <rect x="240" y="50" width="120" height="100" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="1.5" strokeDasharray="5,3"/>
+
+                    {/* Subjective mind zone */}
+                    {zVerts.length >= 3 && (
+                      <polygon
+                        points={zVerts.map(v => `${300 + v.x * 60},${100 + v.y * 50}`).join(" ")}
+                        fill="rgba(239,68,68,0.1)" stroke="#ef4444" strokeWidth="1.8" strokeDasharray="4,2"/>
+                    )}
+
+                    {/* Scatter dots */}
+                    {history.slice(0, 80).map(p => {
+                      const cx = 300 + p.realX * 60;
+                      const cy = 100 + p.realY * 50;
+                      const dotColor = !p.consist ? "#f59e0b"
+                        : p.isCorrect ? (p.called === "STRIKE" ? "#10b981" : "#3b82f6")
+                        : "#ef4444";
+                      return (
+                        <circle key={p.id} cx={cx} cy={cy} r={!p.consist ? 4 : 3}
+                          fill={dotColor} opacity="0.85"
+                          style={!p.consist ? { animation: "ping2 .9s infinite" } : {}}/>
+                      );
+                    })}
+
+                    <text x="300" y="42" textAnchor="middle" fill="rgba(255,255,255,0.25)" fontSize="8" fontFamily="monospace" fontWeight="bold">OFFICIAL ZONE (官方標竿)</text>
+                  </svg>
+                </div>
+
+                <div className="flex gap-4 mt-3.5 flex-wrap text-[10px] text-slate-500 justify-center font-bold">
+                  {[
+                    ["bg-emerald-500", "正確判定好球"],
+                    ["bg-blue-500", "正確判定壞球"],
+                    ["bg-rose-500", "誤判彈道"],
+                    ["bg-amber-500", "尺度不一致點"],
+                  ].map(([cls, l]) => (
+                    <span key={l} className="flex items-center gap-1.5"><span className={`w-2.5 h-2.5 rounded-full ${cls}`}/>{l}</span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Extensive History logs */}
+              {history.length > 0 && (
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-md">
+                  <p className="text-xs font-bold text-slate-300 mb-3 border-b border-slate-800 pb-2">📋 實戰歷史明細 (顯示最近 30 顆球)</p>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[10px] text-left border-collapse">
+                      <thead>
+                        <tr className="text-slate-500 border-b border-slate-800">
+                          {["排序", "球路", "球速", "精確位置 (x,y)", "官方彈道", "您判", "結果", "時機評估", "XP 增減", "一致性"].map(h => (
+                            <th key={h} className="pb-2 pr-3 font-bold">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {history.slice(0, 30).map((p, i) => (
+                          <tr key={p.id} className={`border-b border-slate-800/40 hover:bg-slate-800/20 transition ${!p.consist ? "bg-amber-950/10" : ""}`}>
+                            <td className="py-2 pr-3 text-slate-500">{history.length - i}</td>
+                            <td className="pr-3 font-bold" style={{ color: p.type.color }}>{p.type.abbr}</td>
+                            <td className="pr-3 text-slate-300 font-mono">{p.speed} km/h</td>
+                            <td className="pr-3 text-slate-500 font-mono">{p.realX.toFixed(2)}, {p.realY.toFixed(2)}</td>
+                            <td className={`pr-3 font-bold ${p.isStrike ? "text-emerald-400" : "text-rose-400"}`}>{p.isStrike ? "STRIKE" : "BALL"}</td>
+                            <td className={`pr-3 font-black ${p.called === "STRIKE" ? "text-emerald-400" : "text-rose-400"}`}>{p.called}</td>
+                            <td className="pr-3 text-xs">{p.isCorrect ? "✅ 正確" : "❌ 誤判"}</td>
+                            <td className="pr-3 text-slate-400">{p.precision || "NORMAL"}</td>
+                            <td className={`pr-3 font-black ${p.xpD > 0 ? "text-emerald-400" : "text-rose-400"}`}>
+                              {p.xpD > 0 ? `+${p.xpD}` : p.xpD}
+                            </td>
+                            <td>{p.consist ? "✓ 正常" : "⚠️ 不一致"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── SETTINGS / PROFILE VIEW ── */}
+          {tab === "settings" && (
+            <div className="max-w-2xl mx-auto flex flex-col gap-4 fade-in font-mono">
+              
+              {/* 💳 高清雷射主審執照卡 */}
+              <div className="bg-gradient-to-br from-indigo-950 via-slate-900 to-slate-950 border-2 border-cyan-500/50 rounded-2xl p-6 relative overflow-hidden shadow-2xl">
+                <div className="absolute top-0 right-1/4 bottom-0 w-8 bg-gradient-to-r from-transparent via-cyan-500/10 to-transparent skew-x-12 pointer-events-none" />
+                <div className="absolute top-4 right-4 bg-slate-900 border border-slate-700 rounded p-1 text-[8px] text-slate-500 leading-tight text-right">
+                  <p className="font-bold text-cyan-400 font-mono">MLB ACADEMY CERTIFIED</p>
+                  <p>CERTIFIED: 2026</p>
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-5 items-center">
+                  <div className="w-20 h-24 bg-slate-950 border border-slate-700 rounded-lg flex flex-col items-center justify-center p-1 relative">
+                    <span className="text-3xl filter saturate-50">⚖️</span>
+                    <p className="text-[7px] text-slate-500 mt-2">OFFICIAL SEAL</p>
+                    <div className="absolute bottom-1 left-2 right-2 h-2.5 bg-slate-800 overflow-hidden flex gap-0.5 opacity-50">
+                      {[...Array(12)].map((_, i) => (
+                        <div key={i} className="h-full bg-slate-300" style={{ width: `${Math.random()*3}px` }} />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex-1 space-y-2 text-left w-full">
+                    <div>
+                      <label className="text-[8px] text-slate-500 font-bold block uppercase tracking-wider">主審姓名 (可自訂)</label>
+                      <input type="text" value={umpireName} onChange={e => setUmpireName(e.target.value.slice(0, 10))}
+                        className="bg-slate-950 border border-slate-800 hover:border-slate-700 focus:border-cyan-500 px-2 py-1 rounded text-sm text-slate-100 font-bold outline-none w-full sm:w-48 font-sans"/>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-[10px]">
+                      <div>
+                        <p className="text-slate-500 font-bold">執法職階等級</p>
+                        <p className="text-amber-400 font-black">{curLvl.title}</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500 font-bold">歷史最高連對</p>
+                        <p className="text-cyan-400 font-black">{bestStreak} 顆球</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500 font-bold">解鎖成就章</p>
+                        <p className="text-emerald-400 font-black">{achievements.length} / 4 個</p>
+                      </div>
+                      <div>
+                        <p className="text-slate-500 font-bold">綜合判定率</p>
+                        <p className="text-slate-200 font-black">{acc}%</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 🎖️ 專業認證徽章 */}
+                <div className="border-t border-slate-800 mt-4 pt-4 space-y-2">
+                  <p className="text-[9px] text-slate-400 font-bold block uppercase tracking-wider">🎓 專業考核特訓執照：</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                    {[
+                      { id: "exam_fastball", name: "⚡ 速球大師", icon: "🔥", cls: "text-amber-400 border-amber-500/40" },
+                      { id: "exam_breaking", name: "🌀 變化球專科", icon: "🌪️", cls: "text-cyan-400 border-cyan-500/40" },
+                      { id: "exam_framing", name: "🛡️ 抗偷幀大師", icon: "👁️", cls: "text-emerald-400 border-emerald-500/40" }
+                    ].map(cert => {
+                      const active = unlockedCerts.includes(cert.id);
+                      return (
+                        <div key={cert.id} className={`px-2.5 py-1 text-[10px] font-bold rounded-lg border flex items-center gap-1.5 transition-all duration-500
+                          ${active ? `bg-gradient-to-r ${cert.cls} shadow-lg shadow-black` : "bg-slate-950/80 border-slate-800 text-slate-600"}`}>
+                          <span>{active ? "🏅" : "🔒"}</span>
+                          <span>{cert.name}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-800/80 mt-4 pt-3 flex flex-wrap justify-between items-center text-[8.5px] text-slate-500 font-mono">
+                  <span>LICENSE ID: UP-850-{(xp * 17).toString(16).toUpperCase()}</span>
+                  <span>MLB OFFICIAL UMPIRE SELECTION & TRAINING DEPT.</span>
+                </div>
+              </div>
+
+              {/* ⚙️ 模擬參數配置面板 */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-6 shadow-xl text-left">
+                <p className="text-xs font-bold text-slate-300 border-b border-slate-800 pb-2 uppercase tracking-widest font-mono">⚙️ 執法模擬環境調試與重置</p>
+
+                {/* Zone tolerance adjust */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between items-center">
+                    <label className="text-[11px] text-slate-400 font-bold">官方好球帶物理放寬/縮減 (改變判定邊界)</label>
+                    <span className="text-amber-400 font-black text-xs bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-800/40 font-mono">
+                      {zoneMargin >= 0 ? `+${zoneMargin.toFixed(2)}` : zoneMargin.toFixed(2)}
+                    </span>
+                  </div>
+                  <input type="range" min="-0.15" max="0.25" step="0.01"
+                    value={zoneMargin} onChange={e => setZoneMargin(Number(e.target.value))}
+                    className="w-full accent-amber-500 bg-slate-950 h-2 rounded-lg cursor-pointer"/>
+                  <div className="flex justify-between text-[9px] text-slate-600 font-bold">
+                    <span>嚴苛 (-0.15)</span>
+                    <span>大聯盟標準 (0.00)</span>
+                    <span>放寬 (+0.25)</span>
+                  </div>
+                </div>
+
+                {/* Pitcher Selection */}
+                <div className="space-y-2">
+                  <label className="text-[11px] text-slate-400 block font-bold">手動指定對戰投手 (PITCHER)</label>
+                  <div className="grid grid-cols-1 gap-1.5">
+                    {PITCHERS.map(p => (
+                      <button key={p.name} onClick={() => setPitcher(p)}
+                        className={`p-2.5 rounded-lg border text-left text-[10px] transition flex justify-between items-center ${pitcher.name === p.name ? "border-amber-500 bg-amber-950/20 text-amber-300" : "border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700 hover:text-slate-200"}`}>
+                        <span className="font-bold">{p.name}</span>
+                        <span className="text-slate-500 font-mono text-[9px]">速比:{p.sMult} | 阻力:{p.bMult} | 誤差:±{p.err}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Catcher Selection */}
+                <div className="space-y-2">
+                  <label className="text-[11px] text-slate-400 block font-bold">手動指定防守捕手 (CATCHER)</label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {CATCHERS.map(c => (
+                      <button key={c.name} onClick={() => setCatcher(c)}
+                        className={`p-2.5 rounded-lg border text-left text-[10px] transition flex flex-col gap-1 ${catcher.name === c.name ? "border-cyan-500 bg-cyan-950/20 text-cyan-300" : "border-slate-800 bg-slate-950 text-slate-400 hover:border-slate-700 hover:text-slate-200"}`}>
+                        <span className="font-bold">{c.name}</span>
+                        <span className={`text-[9px] ${c.cls} font-mono`}>Framing 偷球技巧: {c.fm}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Career Reset Action */}
+                <button onClick={() => {
+                  setXp(0); setLvl(0); setRep(100); setStreak(0); setBestStreak(0); setCombo(1.0);
+                  setInning(1); setIsTop(true); setOuts(0); setStrikes(0); setBalls(0);
+                  setAwayScore(0); setHomeScore(0); setRunners([false, false, false]);
+                  setAwayCh(3); setHomeCh(3); setPitch(null); setPhase("ready");
+                  phaseR.current = "ready"; setLocked(false); lockedR.current = false;
+                  setHistory([]); setRecent([]); setMiscalls(0); miscallsR.current = 0;
+                  setZVerts([]); setChallenge(null); setAbsComplete(false); setAbsVerdict(false); setCrowdFavor(50);
+                  setAchievements([]); setActiveExam("free"); setUnlockedCerts([]); setInconsistentCount(0);
+                }}
+                  className="w-full py-3 rounded-xl border border-rose-900 bg-rose-950/20 hover:bg-rose-950/50 text-rose-400 text-[11px] font-black transition shadow-md font-mono">
+                  🗑️ 清空所有統計紀錄並重置主審特訓職業生涯 (不保留執照與成就)
+                </button>
+              </div>
+            </div>
+          )}
+
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   好球帶 2D 渲染組件 (Zone SVG Renderer - 手套延時拖曳與極簡引導)
+═══════════════════════════════════════════════════════════ */
+function Zone({ pitch, revealed, ballPos, ballProg, batter, catcher, phase, zoneHidden, zoneMargin, ctarget, crossUp, fluke, fadeP }) {
+  const W = 320, H = 360, ZW = 120, ZH = 140, ZY = 90;
+  const { tB, bB } = batter;
+  const topY = ZY + ZH / 2 + tB * (ZH / 2);
+  const bottomY = ZY + ZH / 2 + bB * (ZH / 2);
+  const effL = (ZW / 2) * (1 + zoneMargin);
+  const effTopY = topY - zoneMargin * (ZH / 2);
+  const effBotY = bottomY + zoneMargin * (ZH / 2);
+
+  const tgtX = W / 2 + ctarget.x * (ZW / 2);
+  const tgtY = ZY + ZH / 2 + ctarget.y * (ZH / 2);
+
+  let gX = tgtX, gY = tgtY;
+  let dX = W / 2, dY = ZY + ZH / 2;
+
+  if (phase === "ready_fading") {
+    gX = tgtX; 
+    gY = tgtY + (bottomY - tgtY) * fadeP;
+    dX = W / 2; 
+    dY = ZY + ZH / 2 - 1.2 * (ZH / 2);
+  } else if (pitch) {
+    const realX_px = W / 2 + pitch.realX * (ZW / 2);
+    const realY_px = ZY + ZH / 2 + pitch.realY * (ZH / 2);
+    const framedX_px = W / 2 + pitch.framedX * (ZW / 2);
+    const framedY_px = ZY + ZH / 2 + pitch.framedY * (ZH / 2);
+    const gloveBot = bottomY;
+
+    if (ballProg < 0.88) {
+      gX = tgtX; 
+      gY = gloveBot;
+      dX = W / 2 + (ballPos.x * (ZW / 2)); 
+      dY = ZY + ZH / 2 + (ballPos.y * (ZH / 2));
+    } else if (ballProg < 0.93) {
+      const t = (ballProg - 0.88) / 0.05;
+      gX = tgtX + (realX_px - tgtX) * t;
+      gY = gloveBot + (realY_px - gloveBot) * t;
+      dX = W / 2 + (ballPos.x * (ZW / 2)); 
+      dY = ZY + ZH / 2 + (ballPos.y * (ZH / 2));
+    } else {
+      const t = (ballProg - 0.93) / 0.07;
+      gX = realX_px + (framedX_px - realX_px) * t;
+      gY = realY_px + (framedY_px - realY_px) * t;
+      dX = gX; 
+      dY = gY;
+    }
+  }
+
+  if (phase === "decision" && pitch) {
+    gX = W / 2 + pitch.framedX * (ZW / 2);
+    gY = ZY + ZH / 2 + pitch.framedY * (ZH / 2);
+  }
+
+  const zoneBorderColor = revealed
+    ? (pitch?.isStrike ? "#10b981" : "#f43f5e")
+    : "rgba(186,230,253,0.75)";
+
+  const currentBallRadius = 1.2 + ballProg * 4.3;
+  const isBallVisible = pitch && ballProg > 0 && ballProg < 0.98;
+
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} className="block select-none overflow-visible">
+      <defs>
+        <radialGradient id="bg" cx="50%" cy="40%" r="65%">
+          <stop offset="0%" stopColor="#0f172a"/>
+          <stop offset="100%" stopColor="#020617"/>
+        </radialGradient>
+        <linearGradient id="grl" x1="0%" y1="100%" x2="0%" y2="0%">
+          <stop offset="0%" stopColor="#064e3b" stopOpacity=".65"/>
+          <stop offset="100%" stopColor="#022c22" stopOpacity="0"/>
+        </linearGradient>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="3" result="blur"/>
+          <feMerge>
+            <feMergeNode in="blur"/>
+            <feMergeNode in="SourceGraphic"/>
+          </feMerge>
+        </filter>
+      </defs>
+
+      {/* BG */}
+      <rect width={W} height={H} fill="url(#bg)" rx="16"/>
+
+      {/* Dynamic Lights */}
+      {[[20, 15, 1], [300, 15, -1]].map(([bx, by, dir], i) => (
+        <g key={i} opacity=".35">
+          <line x1={bx} y1={by} x2={bx + dir * 8} y2={60} stroke="#475569" strokeWidth="2"/>
+          <rect x={bx - 8} y={by - 5} width={16} height={9} fill="#334155" rx="2"/>
+          {[-4, 0, 4].map(ox => <circle key={ox} cx={bx+ox} cy={by} r={1.8} fill="#fff" filter="url(#glow)"/>)}
+        </g>
+      ))}
+
+      {/* Perspective field lines */}
+      {Array.from({ length: 11 }).map((_, i) => (
+        <line key={i} x1={W / 2} y1={22} x2={W * .03 + W * .94 * (i / 10)} y2={H - 14}
+          stroke="rgba(80,120,220,.04)" strokeWidth="1"/>
+      ))}
+
+      {/* Turf grass overlay */}
+      <path d={`M${W / 2 - 85},${H - 58}L${W / 2 + 85},${H - 58}L${W / 2 + 135},${H}L${W / 2 - 135},${H}Z`} fill="url(#grl)"/>
+
+      {/* Ground Homeplate design */}
+      <polygon points={`${W / 2 - 52},${H - 34} ${W / 2 + 52},${H - 34} ${W / 2+52},${H-21} ${W / 2},${H-8} ${W / 2-52},${H-21}`}
+        fill="rgba(30,41,59,.7)" stroke="rgba(148,163,184,.4)" strokeWidth="1.5"/>
+
+      {/* Target Crosshair */}
+      {phase === "ready" && (
+        <g opacity=".45">
+          <ellipse cx={tgtX} cy={tgtY} rx="26" ry="22" fill="none" stroke="#fcd34d" strokeWidth="2" strokeDasharray="5,3"/>
+          <text x={tgtX} y={tgtY + 4} fontSize="8" fill="#fcd34d" textAnchor="middle" fontWeight="black" fontFamily="sans-serif">TARGET</text>
+        </g>
+      )}
+
+      {/* Strike Zone Frame Box (zoneHidden 決定宣判前絕對隱形) */}
+      <rect x={W / 2 - effL} y={effTopY} width={effL * 2} height={effBotY - effTopY}
+        fill="none" stroke={zoneBorderColor} strokeWidth="2"
+        opacity={zoneHidden ? 0 : 1}
+        style={{ transition: "opacity .12s" }}/>
+
+      <text x={W / 2} y={effTopY - 8} fontSize="8.5" fill="rgba(186,230,253,.35)"
+        textAnchor="middle" fontFamily="monospace" letterSpacing="3" fontWeight="bold"
+        opacity={zoneHidden ? 0 : 1}>好球帶 ZONE</text>
+
+      {/* Animated Catcher Glove */}
+      <g className="glove-anim" style={{ transition: crossUp && ballProg > .85 ? "transform .05s ease-out" : "none" }}>
+        <ellipse cx={gX} cy={gY} rx={22} ry={19.5} fill="#4a2c11" stroke="#331c0a" strokeWidth="2"/>
+        <circle cx={gX} cy={gY} r={6} fill="rgba(0,0,0,.3)"/>
+        <line x1={gX - 12} y1={gY + 8} x2={gX + 12} y2={gY + 8} stroke="#5d3a18" strokeWidth="1.5" strokeLinecap="round"/>
+      </g>
+
+      {/* Ball in flight */}
+      {isBallVisible && (
+        <circle cx={dX} cy={dY} r={currentBallRadius} fill="#fafaf9" stroke="rgba(200,220,255,.5)" strokeWidth={ballProg > .85 ? 0 : 0.8}/>
+      )}
+
+      {/* Trajectory lines and dots after call */}
+      {revealed && pitch && (
+        <g>
+          {/* 真實接球點 (黃色高亮準星) */}
+          <circle cx={W / 2 + pitch.realX * (ZW / 2)} cy={ZY + ZH / 2 + pitch.realY * (ZH / 2)} r={4.5} fill="none" stroke="#f59e0b" strokeWidth="1.5"/>
+          <circle cx={W / 2 + pitch.realX * (ZW / 2)} cy={ZY + ZH / 2 + pitch.realY * (ZH / 2)} r={1.5} fill="#f59e0b"/>
+          
+          {/* 偷球拖曳路徑 (手套物理扯動線) */}
+          <line x1={W / 2 + pitch.realX * (ZW / 2)} y1={ZY + ZH / 2 + pitch.realY * (ZH / 2)}
+                x2={W / 2 + pitch.framedX * (ZW / 2)} y2={ZY + ZH / 2 + pitch.framedY * (ZH / 2)}
+                stroke="#f59e0b" strokeWidth="1.8" strokeDasharray="3,2" style={{ filter: "drop-shadow(0 0 2px #f59e0b)" }}/>
+          
+          {/* 最終持球點 (綠色實心) */}
+          <circle cx={W / 2 + pitch.framedX * (ZW / 2)} cy={ZY + ZH / 2 + pitch.framedY * (ZH / 2)} r={3.2} fill="#10b981"/>
+          
+          {/* 真實判定點資訊標籤 */}
+          <text x={W / 2 + pitch.realX * (ZW / 2)} y={ZY + ZH / 2 + pitch.realY * (ZH / 2) - 9}
+            fontSize="8" textAnchor="middle" fill="#f59e0b" fontWeight="black" fontFamily="sans-serif">
+            {pitch.isStrike ? "● 真實好球 (STRIKE)" : "● 真實壞球 (BALL)"}
+          </text>
+
+          {/* 顯示扯拉公分數 */}
+          <g transform={`translate(${W / 2 + (pitch.realX + pitch.framedX) * (ZW / 4) - 30}, ${ZY + ZH / 2 + (pitch.realY + pitch.framedY) * (ZH / 4) - 6})`}>
+            <rect x="0" y="0" width="60" height="11" rx="2" fill="rgba(15,23,42,0.9)" stroke="#faf089" strokeWidth="0.5"/>
+            <text x="30" y="8" fontSize="6.5" fill="#faf089" textAnchor="middle" fontFamily="monospace" fontWeight="bold">
+              位移 {(Math.hypot(pitch.realX - pitch.framedX, pitch.realY - pitch.framedY) * 21.6).toFixed(1)} cm
+            </text>
+          </g>
+        </g>
+      )}
+    </svg>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════
+   電子眼挑戰系統渲染 (ABS Hawk-Eye Renderer with Dynamic Zoom-In)
+═══════════════════════════════════════════════════════════ */
+function AbsRenderer({ ev, progress, batter, zoneMargin, showVerdict }) {
+  const W = 320, H = 360, ZW = 120, ZH = 140, ZY = 90;
+  const { tB, bB } = batter;
+  const topY = ZY + ZH / 2 + tB * (ZH / 2), bottomY = ZY + ZH / 2 + bB * (ZH / 2);
+  const effL = (ZW / 2) * (1 + zoneMargin);
+  const effTopY = topY - zoneMargin * (ZH / 2);
+  const effBotY = bottomY + zoneMargin * (ZH / 2);
+
+  const finalX = W / 2 + ev.realX * (ZW / 2);
+  const finalY = ZY + ZH / 2 + ev.realY * (ZH / 2);
+
+  const pathP = Math.min(1.0, progress * 1.5);
+  const pts = [];
+  for (let t = 0; t <= pathP; t += 0.05) {
+    pts.push({
+      x: W / 2 + ((ev.realX * t + (ev.type?.brkX / 100 || 0) * Math.sin(t * Math.PI)) * (ZW / 2)),
+      y: ZY + ZH / 2 + ((-1.2 * (1 - t) + ev.realY * t + (ev.type?.brkY / 100 || 0) * Math.sin(t * Math.PI)) * (ZH / 2)),
+    });
+  }
+
+  let vx = 0, vy = 0, vw = 320, vh = 360;
+  const zoomStartProg = 0.72;
+
+  if (progress > zoomStartProg) {
+    const t = Math.min(1.0, (progress - zoomStartProg) / (1.0 - zoomStartProg));
+    const ease = t * t * (3 - 2 * t);
+    
+    const targetW = 130;
+    const targetH = 146.25;
+    const targetX = finalX - targetW / 2;
+    const targetY = finalY - targetH / 2;
+
+    vx = 0 + (targetX - 0) * ease;
+    vy = 0 + (targetY - 0) * ease;
+    vw = 320 + (targetW - 320) * ease;
+    vh = 360 + (targetH - 360) * ease;
+  }
+
+  let ballRadius = 2.5 + progress * 5.0; 
+  if (progress > zoomStartProg) {
+    const zoomRatio = (progress - zoomStartProg) / (1.0 - zoomStartProg);
+    ballRadius = (2.5 + progress * 5.0) + zoomRatio * 11.5; 
+  }
+
+  const bX = pts.length ? pts[pts.length - 1].x : W / 2;
+  const bY = pts.length ? pts[pts.length - 1].y : ZY + ZH / 2;
+
+  const done = progress >= 0.98;
+  const zFill = showVerdict ? (ev.isStrike ? "rgba(16,185,129,.22)" : "rgba(59,130,246,.18)") : "rgba(56,189,248,.08)";
+  const zStroke = showVerdict ? (ev.isStrike ? "#10b981" : "#3b82f6") : "#38bdf8";
+  const chColor = ev.isStrike ? "#10b981" : "#3b82f6";
+
+  const scalePxToCm = 0.36; 
+  
+  const dxVal = Math.abs(ev.realX) - (1.0 + zoneMargin);
+  const dxCm = Math.abs(dxVal * (ZW / 2) * scalePxToCm);
+
+  let dyCm = 0;
+  let verticalStatus = "in"; 
+  const pixelTB = effTopY;
+  const pixelBB = effBotY;
+
+  if (finalY < pixelTB) {
+    verticalStatus = "high";
+    dyCm = (pixelTB - finalY) * scalePxToCm;
+  } else if (finalY > pixelBB) {
+    verticalStatus = "low";
+    dyCm = (finalY - pixelBB) * scalePxToCm;
+  }
+
+  return (
+    <svg width="100%" height="100%" viewBox={`${vx} ${vy} ${vw} ${vh}`} className="transition-all duration-75">
+      <polygon points={`${W / 2 - 52},${H - 34} ${W / 2 + 52},${H - 34} ${W / 2 + 52},${H - 21} ${W / 2},${H - 8} ${W / 2 - 52},${H - 21}`}
+        fill="none" stroke="#38bdf8" strokeWidth="1.5" strokeDasharray="4,2" opacity={progress > zoomStartProg ? 0.15 : 0.45}/>
+
+      {/* ABS 好球帶框架 */}
+      <rect x={W / 2 - effL} y={effTopY} width={effL * 2} height={effBotY - effTopY}
+        fill={zFill} stroke={zStroke} strokeWidth="2" style={{ transition: "all .4s" }}/>
+
+      {/* 電子軌跡線條 */}
+      {pts.length > 1 && (
+        <polyline
+          points={pts.map(p => `${p.x},${p.y}`).join(" ")}
+          fill="none" stroke={ev.type?.color || "#fcd34d"} strokeWidth="2.2"
+          style={{ filter: "drop-shadow(0 0 3px currentColor)" }} opacity={progress > zoomStartProg ? 0.35 : 0.95}/>
+      )}
+
+      {/* ABS 飛行棒球 */}
+      <circle cx={bX} cy={bY} r={ballRadius} fill="#fff" style={{ filter: "drop-shadow(0 0 5px #fff)" }}/>
+
+      {/* Done 挑戰結果量測標籤線 */}
+      {done && showVerdict && (
+        <g className="fade-in">
+          {/* 精確落點準心 */}
+          <circle cx={finalX} cy={finalY} r={ballRadius + 2.5} fill="none" stroke={chColor} strokeWidth="1.5" opacity=".8"/>
+          <line x1={finalX - 35} y1={finalY}   x2={finalX + 35} y2={finalY}   stroke={chColor} strokeWidth="1"/>
+          <line x1={finalX}   y1={finalY - 35} x2={finalX}   y2={finalY + 35} stroke={chColor} strokeWidth="1"/>
+
+          {/* MLB 規格差距標籤拉線與測量數據 */}
+          {ev.isStrike ? (
+            <g>
+              <line x1={finalX} y1={finalY} x2={W / 2 + (ev.realX > 0 ? effL : -effL)} y2={finalY} stroke="#10b981" strokeWidth="1.2" strokeDasharray="3,2" />
+              <rect x={finalX - 32} y={finalY + ballRadius + 3} width="64" height="13" rx="2" fill="rgba(0,0,0,0.85)" stroke="#10b981" strokeWidth="0.8"/>
+              <text x={finalX} y={finalY + ballRadius + 12} fontSize="7" fill="#10b981" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                內切 {Math.abs(dxVal * 21.5).toFixed(1)} cm
+              </text>
+            </g>
+          ) : (
+            <g>
+              {/* 水平偏出 */}
+              {dxVal > 0 && (
+                <g>
+                  <line x1={finalX} y1={finalY} x2={W / 2 + (ev.realX > 0 ? effL : -effL)} y2={finalY} stroke="#ef4444" strokeWidth="1.2" strokeDasharray="2,2" />
+                  <rect x={finalX > W / 2 ? finalX + 12 : finalX - 62} y={finalY - 5} width="50" height="11" rx="2" fill="rgba(0,0,0,0.9)" stroke="#ef4444" strokeWidth="0.5"/>
+                  <text x={finalX > W / 2 ? finalX + 37 : finalX - 37} y={finalY + 3} fontSize="6" fill="#ef4444" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                    偏外 {dxCm.toFixed(1)} cm
+                  </text>
+                </g>
+              )}
+              {/* 垂直偏出 */}
+              {verticalStatus !== "in" && (
+                <g>
+                  <line x1={finalX} y1={finalY} x2={finalX} y2={verticalStatus === "high" ? pixelTB : pixelBB} stroke="#ef4444" strokeWidth="1.2" strokeDasharray="2,2" />
+                  <rect x={finalX - 25} y={verticalStatus === "high" ? finalY - 14 : finalY + ballRadius + 2} width="50" height="11" rx="2" fill="rgba(0,0,0,0.9)" stroke="#ef4444" strokeWidth="0.5"/>
+                  <text x={finalX} y={verticalStatus === "high" ? finalY - 6 : finalY + ballRadius + 10} fontSize="6" fill="#ef4444" fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+                    {verticalStatus === "high" ? "偏高" : "偏低"} {dyCm.toFixed(1)} cm
+                  </text>
+                </g>
+              )}
+            </g>
+          )}
+
+          {/* 數值看板 */}
+          <g transform={`translate(${finalX - 35}, ${finalY - ballRadius - 16})`}>
+            <rect x="0" y="0" width="70" height="13" rx="2.5" fill="rgba(0,0,0,0.85)" stroke={chColor} strokeWidth="0.8"/>
+            <text x="35" y="9" fontSize="7" fill={chColor} fontFamily="monospace" fontWeight="bold" textAnchor="middle">
+              GAP: {ev.realX.toFixed(2)}, {ev.realY.toFixed(2)}
+            </text>
+          </g>
+        </g>
+      )}
+    </svg>
+  );
+}
+
+```
