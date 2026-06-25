@@ -1,0 +1,1451 @@
+```html
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    
+    <!-- iOS PWA 原生視窗元數據 -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Umpire Pro">
+    
+    <!-- PWA Web App Manifest -->
+    <link rel="manifest" href="data:application/manifest+json,%7B%22name%22%3A%22Umpire%20Pro%20%E9%9B%A2%E7%B7%9A%E7%89%B9%E8%A8%91%E7%B3%BB%E7%B5%B1%22%2C%22short_name%22%3A%22UmpirePro%22%2C%22start_url%22%3A%22.%22%2C%22display%22%3A%22standalone%22%2C%22background_color%22%3A%22%23020617%22%2C%22theme_color%22%3A%22%23020617%22%2C%22icons%22%3A%5B%7B%22src%22%3A%22data%3Aimage%2Fsvg%2Bxml%2C%253Csvg%2520xmlns%3D%2522http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%2522%2520viewBox%3D%25220%25200%2520512%2520512%2522%253E%253Crect%2520width%3D%2522512%2522%2520height%3D%2522512%2522%2520rx%3D%2522100%2522%2520fill%3D%2522%2523020617%2522%252F%253E%253Ctext%2520x%3D%252250%2525%2522%2520y%3D%252260%2525%2522%2520font-size%3D%2522260%2522%2520text-anchor%3D%2522middle%2522%2520dominant-baseline%3D%2522middle%2522%253E%25E2%259A%2596%25EF%25B8%258F%253C%2Ftext%253E%253C%2Fsvg%253E%22%2C%22sizes%22%3A%22512x512%22%2C%22type%22%3A%22image%2Fsvg%2Bxml%22%7D%5D%7D">
+    
+    <!-- iOS 專用圖標 -->
+    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='100' fill='%23020617'/%3E%3Ctext x='50%25' y='60%25' font-size='260' text-anchor='middle' dominant-baseline='middle'%3E⚖️%3C/text%3E%3C/svg%3E">
+    
+    <title>Umpire Pro 離線特訓系統</title>
+    
+    <!-- 載入極速 Tailwind CSS (不依賴 React 庫，實現 0.1 秒瞬開) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes gloveBreath { 0%,100%{transform:translateY(0) rotate(0deg)} 50%{transform:translateY(1.2px) rotate(.35deg)} }
+        @keyframes tremor { 0%,100%{transform:translate(0,0)} 25%{transform:translate(-.3px,.3px)} 75%{transform:translate(.3px,-.3px)} }
+        .glove-anim { animation: gloveBreath 3.4s ease-in-out infinite, tremor .11s linear infinite; transform-origin:center; }
+        .sl-grid  { background-image:linear-gradient(rgba(56,189,248,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(56,189,248,.06) 1px,transparent 1px); background-size:20px 20px; }
+        
+        @keyframes customShake { 0%, 100% { transform: translate3d(0, 0, 0); } 10%, 30%, 50%, 70%, 90% { transform: translate3d(-3px, 1px, 0); } 20%, 40%, 60%, 80% { transform: translate3d(3px, -1px, 0); } }
+        .shake-active { animation: customShake 0.4s cubic-bezier(.36,.07,.19,.97) both; }
+        .touch-manipulation { touch-action: manipulation; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 select-none overflow-x-hidden touch-manipulation">
+
+    <!-- ══ APP CONTAINER ══ -->
+    <div id="app" class="min-h-screen flex flex-col font-sans">
+        
+        <!-- 頂部導航列 -->
+        <header class="border-b border-slate-800 bg-slate-900/95 sticky top-0 z-50 backdrop-blur shadow-lg h-14 flex items-center px-4 justify-between">
+            <div class="flex items-center gap-1.5">
+                <span class="text-xl">⚖️</span>
+                <div>
+                    <p class="text-xs font-black bg-gradient-to-r from-amber-400 to-cyan-400 bg-clip-text text-transparent tracking-wider uppercase leading-none">Umpire Pro 8.8</p>
+                    <span class="text-[7px] bg-slate-800 text-emerald-400 border border-emerald-950 px-1 py-[1px] rounded font-mono font-bold">100% iOS 離線保障</span>
+                </div>
+            </div>
+
+            <!-- 生命/等級進度條 (進入實戰後顯示) -->
+            <div id="header-progress" class="hidden flex-1 max-w-[140px] xs:max-w-xs px-2">
+                <div class="flex justify-between text-[8px] text-slate-400 mb-0.5 leading-none">
+                    <span id="progress-title" class="font-bold text-amber-400 truncate max-w-[70px]">1A 菜鳥裁判</span>
+                    <span id="progress-xp">0 XP</span>
+                </div>
+                <div class="h-1 bg-slate-800 rounded-full overflow-hidden">
+                    <div id="progress-bar" class="h-full bg-gradient-to-r from-amber-500 to-cyan-500 rounded-full transition-all duration-700" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <!-- 分頁切換器 -->
+            <div id="tab-controls" class="hidden items-center bg-slate-800 p-0.5 rounded-lg border border-slate-700">
+                <button onclick="switchTab('game')" id="btn-tab-game" class="px-2 py-1 rounded-md text-[10px] font-bold bg-amber-500 text-slate-950">實戰</button>
+                <button onclick="switchTab('scorecard')" id="btn-tab-scorecard" class="px-2 py-1 rounded-md text-[10px] font-bold text-slate-400">數據</button>
+                <button onclick="switchTab('settings')" id="btn-tab-settings" class="px-2 py-1 rounded-md text-[10px] font-bold text-slate-400">備份</button>
+            </div>
+
+            <button id="btn-mute" onclick="toggleMute()" class="p-1 rounded-lg border border-slate-700 text-slate-400 hover:bg-slate-800 text-xs h-7 w-7 flex items-center justify-center">🔊</button>
+        </header>
+
+        <!-- 🔔 通知橫幅 -->
+        <div id="toast-notif" class="hidden fixed top-16 left-1/2 -translate-x-1/2 z-50 text-[10px] font-bold text-amber-300 bg-amber-950/95 border border-amber-600/80 px-4 py-1.5 rounded-full shadow-lg max-w-[90%] text-center"></div>
+
+        <!-- ══ 畫面一：SPLASH 歡迎畫面 ══ -->
+        <div id="screen-splash" class="flex-1 flex flex-col items-center justify-center text-center p-4 cursor-pointer" onclick="bootSystem()">
+            <div class="text-6xl mb-4 animate-bounce">⚖️</div>
+            <p class="text-amber-400 font-mono text-sm tracking-widest border border-amber-500/30 bg-amber-950/20 px-6 py-3 rounded-full">
+                點擊螢幕啟動 iOS 原生引擎<br><span class="text-[10px] text-slate-500 font-bold">(Tap to Boot Native Engine)</span>
+            </p>
+        </div>
+
+        <!-- ══ 畫面二：INTRO 劇情導覽 ══ -->
+        <div id="screen-intro" class="hidden flex-1 flex-col items-center justify-center text-center p-4 bg-black">
+            <button onclick="skipIntro()" class="absolute top-6 right-6 text-slate-500 text-xs border border-slate-700 px-3 py-1 rounded-full">SKIP >></button>
+            <div id="intro-text-box" class="text-lg md:text-xl font-bold tracking-wide text-emerald-400 max-w-md min-h-[120px] flex items-center justify-center leading-relaxed"></div>
+        </div>
+
+        <!-- ══ 畫面三：TUTORIAL 教學步驟 ══ -->
+        <div id="screen-tutorial" class="hidden flex-1 flex-col items-center justify-center p-4 bg-slate-950">
+            <div class="max-w-md w-full bg-slate-900 border border-slate-700 rounded-2xl overflow-hidden shadow-2xl flex flex-col">
+                <div class="p-6 md:p-8 text-center space-y-6">
+                    <div id="tut-icon" class="text-6xl my-4 animate-bounce">👀</div>
+                    <h2 id="tut-title" class="text-xl font-black text-amber-400">⚖️ 歡迎來到主審特訓系統</h2>
+                    <p id="tut-desc" class="text-sm text-slate-300 leading-relaxed font-mono whitespace-pre-line">這不是打擊遊戲。你將站在主審視角，靠肉眼判斷動態速球是否切過好球帶邊緣。</p>
+                </div>
+                <div class="p-4 bg-slate-950 border-t border-slate-800 flex justify-between gap-3">
+                    <button onclick="enterMainMenu()" class="px-4 py-3 bg-slate-800 text-slate-400 font-bold rounded-xl text-xs">跳過教學</button>
+                    <button id="btn-tut-next" onclick="nextTutorialStep()" class="flex-1 bg-cyan-600 text-white font-black rounded-xl text-sm shadow-lg">下一頁 ➜</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ══ 畫面四：MAIN MENU 主選單 ══ -->
+        <div id="screen-menu" class="hidden flex-1 flex-col items-center justify-center p-4">
+            <div class="max-w-xl w-full bg-slate-900 border border-slate-800 p-6 md:p-8 rounded-2xl shadow-2xl space-y-5">
+                <div class="text-center">
+                    <div class="text-5xl mb-2">⚖️</div>
+                    <h1 class="text-2xl font-black bg-gradient-to-r from-amber-400 to-cyan-400 bg-clip-text text-transparent">Umpire Pro 離線特訓原生版</h1>
+                    <p class="text-xs text-slate-400 mt-1 font-mono">100% 本地即時運行 × 全程零網路流量加載</p>
+                </div>
+                <div class="space-y-2 text-left">
+                    <p class="text-[10px] font-bold text-slate-400 font-mono uppercase tracking-wider">🌟 選擇您的特訓/學院證照考核模式：</p>
+                    <div id="exam-list-container" class="flex flex-col gap-1.5 max-h-[220px] overflow-y-auto pr-1"></div>
+                </div>
+                <button onclick="startLiveUmpire()" class="w-full py-3.5 bg-gradient-to-r from-amber-500 to-cyan-500 text-slate-950 font-black rounded-xl shadow-lg text-sm">開始執法與接受考驗 ➜</button>
+            </div>
+        </div>
+
+        <!-- ══ 畫面五：LIVE GAME 實戰特訓（包含三大分頁） ══ -->
+        <div id="screen-live" class="hidden flex-1 flex-col p-2 max-w-7xl w-full mx-auto gap-2 relative">
+            
+            <!-- 分頁：實戰特訓 (Game Tab) -->
+            <div id="tab-content-game" class="flex-1 flex flex-col gap-2 min-h-0">
+                <!-- 記分板 Panel -->
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-2 flex flex-row items-center justify-between gap-1.5 shadow-md h-16 shrink-0 overflow-hidden">
+                    <div class="flex items-center justify-center w-10 h-10">
+                        <div class="relative w-8 h-8 rotate-45 border-slate-800 border-[1.5px] rounded-sm bg-slate-950/40">
+                            <div id="base-2" class="absolute w-2.5 h-2.5 rounded-sm bg-slate-800 border border-slate-700/60 top-0 left-0"></div>
+                            <div id="base-1" class="absolute w-2.5 h-2.5 rounded-sm bg-slate-800 border border-slate-700/60 bottom-0 left-0"></div>
+                            <div id="base-3" class="absolute w-2.5 h-2.5 rounded-sm bg-slate-800 border border-slate-700/60 top-0 right-0"></div>
+                        </div>
+                    </div>
+                    <div class="flex-1 flex items-center justify-around font-mono max-w-xs">
+                        <div class="text-center">
+                          <p class="text-[8px] text-slate-500 font-bold leading-none mb-0.5">AWAY</p>
+                          <p id="score-away" class="text-lg font-black text-cyan-400 leading-none">0</p>
+                        </div>
+                        <div class="text-center">
+                          <p id="inning-arrow" class="text-[9px] text-slate-600 font-bold leading-none">▲</p>
+                          <p id="inning-text" class="text-[11px] font-bold text-slate-400 leading-none">1局</p>
+                        </div>
+                        <div class="text-center">
+                          <p class="text-[8px] text-slate-500 font-bold leading-none mb-0.5">HOME</p>
+                          <p id="score-home" class="text-lg font-black text-amber-400 leading-none">0</p>
+                        </div>
+                    </div>
+                    <!-- S/B/O 指示燈 -->
+                    <div class="flex flex-col gap-0.5 justify-center text-[10px] font-mono shrink-0">
+                        <div class="flex items-center gap-1">
+                            <span class="text-[8px] text-slate-500 font-bold w-3 text-center">S</span>
+                            <div id="lights-strike" class="flex gap-1">
+                                <div class="w-2.5 h-2.5 rounded-full bg-slate-800 border border-slate-700"></div>
+                                <div class="w-2.5 h-2.5 rounded-full bg-slate-800 border border-slate-700"></div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-1">
+                            <span class="text-[8px] text-slate-500 font-bold w-3 text-center">B</span>
+                            <div id="lights-ball" class="flex gap-1">
+                                <div class="w-2.5 h-2.5 rounded-full bg-slate-800 border border-slate-700"></div>
+                                <div class="w-2.5 h-2.5 rounded-full bg-slate-800 border border-slate-700"></div>
+                                <div class="w-2.5 h-2.5 rounded-full bg-slate-800 border border-slate-700"></div>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-1">
+                            <span class="text-[8px] text-slate-500 font-bold w-3 text-center">O</span>
+                            <div id="lights-out" class="flex gap-1">
+                                <div class="w-2.5 h-2.5 rounded-full bg-slate-800 border border-slate-700"></div>
+                                <div class="w-2.5 h-2.5 rounded-full bg-slate-800 border border-slate-700"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 考試模式專用 HUD -->
+                <div id="exam-hud" class="hidden bg-gradient-to-r from-red-950/80 to-slate-900 border border-red-900/60 rounded-xl px-3 py-2 flex items-center justify-between shadow-lg font-mono text-xs shrink-0 h-10 overflow-hidden">
+                    <div class="flex items-center gap-1.5 truncate"><span class="animate-pulse">🎓</span><p id="exam-hud-title" class="font-bold text-slate-100 truncate">速球證照考試</p></div>
+                    <div class="shrink-0 pl-2"><p id="exam-hud-progress" class="font-black text-amber-400 font-mono text-[11px]">0 / 10</p></div>
+                </div>
+
+                <!-- 主遊戲格柵佈局 -->
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-2 items-start relative flex-1 min-h-0">
+                    
+                    <!-- 左欄：對戰與遥測物理數據 -->
+                    <div class="lg:col-span-3 flex flex-col gap-2 shrink-0">
+                        <div class="bg-slate-900 border border-slate-800 rounded-xl p-2.5 space-y-1.5 shadow-lg">
+                            <div class="flex justify-between items-center text-[8px] font-bold text-slate-400 border-b border-slate-800 pb-1">
+                                <span>對戰物理參數</span><span id="wind-text" class="text-[10px] text-blue-400 font-mono">🍃 無風靜止</span>
+                            </div>
+                            <div class="grid grid-cols-3 lg:grid-cols-1 gap-1.5 text-[10px]">
+                                <div class="bg-slate-950/85 rounded-lg p-1.5 border border-slate-800 flex flex-col lg:flex-row lg:justify-between lg:items-center">
+                                    <span class="text-[7.5px] text-slate-500 font-bold">投手</span><span id="p-pitcher" class="text-[10px] font-bold text-red-400">格蘭特</span>
+                                </div>
+                                <div class="bg-slate-950/85 rounded-lg p-1.5 border border-slate-800 flex flex-col lg:flex-row lg:justify-between lg:items-center">
+                                    <span class="text-[7.5px] text-slate-500 font-bold">捕手</span><span id="p-catcher" class="text-[10px] font-bold text-amber-400">莫里納</span>
+                                </div>
+                                <div class="bg-slate-950/85 rounded-lg p-1.5 border border-slate-800 flex flex-col lg:flex-row lg:justify-between lg:items-center">
+                                    <span class="text-[7.5px] text-slate-500 font-bold">打者</span><span id="p-batter" class="text-[10px] font-bold text-cyan-400">賈吉(R)</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-slate-900 border border-slate-800 rounded-xl p-2.5 shadow-lg h-[115px] flex flex-col justify-between">
+                            <div id="telemetry-box" class="space-y-1.5 hidden">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-[8px] font-bold text-slate-400 uppercase">進壘彈道</span>
+                                    <div>
+                                        <span id="tel-abbr" class="text-[9px] font-black px-1.5 py-0.2 rounded border font-mono">FB</span>
+                                        <span id="tel-speed" class="text-[9px] text-slate-400 font-mono">150k</span>
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-1 text-[8.5px] font-mono">
+                                    <div class="bg-slate-950 rounded p-1 border border-slate-800 flex justify-between"><span>X位移</span><span id="tel-brkx" class="text-cyan-400 font-bold">0cm</span></div>
+                                    <div class="bg-slate-950 rounded p-1 border border-slate-800 flex justify-between"><span>Y下墜</span><span id="tel-brky" class="text-emerald-400 font-bold">10cm</span></div>
+                                </div>
+                                <div id="tel-delay" class="text-center text-[9px] font-mono bg-slate-950/50 py-0.5 rounded border border-slate-800 text-slate-400"></div>
+                            </div>
+                            <div id="telemetry-empty" class="flex-1 flex flex-col items-center justify-center text-center py-4 font-mono text-slate-600">
+                                <p class="text-[10px]">📡 TELEMETRY SYSTEM</p>
+                                <p class="text-[8px] mt-0.5">等待投手啟動投球以獲取遙測物理數據</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 中間主畫布：球與好球帶 -->
+                    <div id="game-canvas-area" class="lg:col-span-6 flex flex-col gap-2">
+                        <div id="pitch-screen-box" class="relative bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col items-center justify-center" style="aspect-ratio: 15/17">
+                            
+                            <!-- 2D SVG 好球帶渲染 -->
+                            <svg id="game-svg" width="100%" height="100%" viewBox="0 0 320 360" class="block select-none overflow-visible"></svg>
+
+                            <!-- ABS 鷹眼挑戰覆蓋層 (3D 模擬) -->
+                            <div id="abs-overlay" class="absolute inset-0 z-50 bg-[#050a14] hidden flex-col p-3">
+                                <div class="flex justify-between items-center mb-1.5 pb-1.5 border-b border-slate-800/80">
+                                    <div class="flex items-center gap-1.5 text-[8.5px] font-black text-rose-500 font-mono">📡 ABS TRACKING SYSTEM</div>
+                                    <span id="abs-status" class="text-cyan-400 text-[8px] font-mono">CALCULATING</span>
+                                </div>
+                                <div class="flex-1 relative sl-grid bg-black border border-slate-800/80 rounded-xl overflow-hidden">
+                                    <svg id="abs-svg" width="100%" height="100%" viewBox="0 0 320 360" class="absolute inset-0"></svg>
+                                    <div id="abs-scanline" class="absolute left-0 right-0 h-0.5 bg-red-500/80 pointer-events-none hidden" style="box-shadow: 0 0 10px #ef4444"></div>
+                                </div>
+                                <div class="mt-1.5 flex flex-wrap gap-1.5 justify-between items-center bg-slate-900 p-2 rounded-lg border border-slate-800 h-10 overflow-hidden">
+                                    <div id="abs-info-text" class="text-[8.5px] text-slate-400 font-mono"></div>
+                                    <button id="btn-abs-verdict" onclick="confirmChallenge()" class="hidden py-1 px-3 bg-amber-400 text-slate-950 font-black rounded text-[9px] shadow-lg font-mono">🛎️ 電子宣判 (Space/Enter)</button>
+                                </div>
+                            </div>
+
+                            <!-- 判決文字飄浮動畫效果 -->
+                            <div id="call-effect-overlay" class="absolute inset-0 pointer-events-none z-40 hidden flex-col items-center justify-center bg-slate-950/10">
+                                <div id="call-effect-pop" class="flex flex-col items-center justify-center transition-all duration-300">
+                                    <p id="call-effect-title" class="text-4xl font-black tracking-widest text-amber-400" style="text-shadow: 0 0 15px rgba(0,0,0,0.8)"></p>
+                                    <p id="call-effect-sub" class="text-[8px] font-mono mt-0.5 px-2 py-0.2 rounded border bg-slate-900/90 text-slate-200 border-slate-700"></p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 判定按鈕與提示橫幅 -->
+                        <div class="flex flex-col gap-1.5 w-full max-w-full shrink-0">
+                            <div class="h-[52px] w-full">
+                                <!-- 準備投球按鈕組 -->
+                                <div id="control-ready" class="flex gap-2 w-full h-full">
+                                    <button onclick="backToMenu()" class="py-3 px-3 bg-slate-800 text-slate-300 font-bold text-[11px] rounded-xl shadow">🚪 選單</button>
+                                    <button onclick="startPitch()" class="flex-1 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black text-xs rounded-xl shadow-lg uppercase tracking-widest flex items-center justify-center">⚾ 呼叫投球 (Space / Touch)</button>
+                                </div>
+                                <!-- 好球帶隱形過渡提示 -->
+                                <div id="control-fading" class="hidden h-full bg-slate-900 border border-amber-500/20 text-amber-400 rounded-xl text-[10px] text-center font-bold font-mono items-center justify-center">⚡ 捕手手套滑動干擾視角中…</div>
+                                <div id="control-pitching" class="hidden h-full bg-slate-900 border border-slate-800 text-slate-400 rounded-xl text-[10px] text-center font-mono items-center justify-center">⚾ 高速飛行中 · 好球帶全隱形</div>
+                                <!-- 判決操作按鈕組 -->
+                                <div id="control-decision" class="hidden grid grid-cols-2 gap-2 h-full">
+                                    <button onclick="triggerCall('ball_action')" class="bg-rose-700 text-white font-black text-xs rounded-xl flex flex-col items-center justify-center">
+                                        <span class="text-[7px] font-normal opacity-60">左鍵 / Touch</span>壞 球 (BALL)
+                                    </button>
+                                    <button onclick="triggerCall('strike_action')" class="bg-emerald-600 text-white font-black text-xs rounded-xl flex flex-col items-center justify-center">
+                                        <span class="text-[7px] font-normal opacity-60">右鍵 / Touch</span>好 球 (STRIKE)
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div id="fb-banner" class="rounded-xl px-3 border border-slate-800/80 bg-slate-900/60 text-slate-400 h-[42px] flex items-center justify-center transition shadow-md shrink-0 overflow-hidden">
+                                <p id="fb-banner-text" class="text-[9.5px] font-bold text-center leading-normal font-mono truncate max-w-full">💡 球體邊界只要輕微觸碰或擦過好球帶外框，大聯盟規則一律判定為好球！</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 右欄：歷史彈道紀錄與聲譽 -->
+                    <div class="lg:col-span-3 flex flex-col gap-2 shrink-0">
+                        <div class="bg-slate-900 border border-slate-800 rounded-xl p-2.5 flex-1 shadow-lg min-h-[110px]">
+                            <p class="text-[9px] font-bold text-slate-400 border-b border-slate-800 pb-1 mb-1.5 uppercase">最近 3 次投球軌跡</p>
+                            <div id="recent-pitches-list" class="space-y-1"></div>
+                        </div>
+                        <div class="bg-slate-900 border border-slate-800 rounded-xl p-2.5 shadow-lg shrink-0">
+                            <div class="flex justify-between text-[9px] mb-1 font-mono">
+                                <span class="text-slate-400 font-bold">裁判執法聲譽</span>
+                                <span id="rep-percent-text" class="font-black text-emerald-400">100%</span>
+                            </div>
+                            <div class="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                <div id="rep-progress-bar" class="h-full rounded-full transition-all duration-500 bg-[#10b981]" style="width: 100%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 分頁：生涯數據 (Scorecard Tab) -->
+            <div id="tab-content-scorecard" class="hidden flex-col gap-3 font-mono flex-1 overflow-y-auto">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div class="bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-center shadow-md">
+                        <p class="text-[8.5px] text-slate-500 font-bold mb-0.5">整體判定正確率</p>
+                        <p id="stats-acc" class="text-lg font-black text-emerald-400">100%</p>
+                    </div>
+                    <div class="bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-center shadow-md">
+                        <p class="text-[8.5px] text-slate-500 font-bold mb-0.5">主觀尺度一致性</p>
+                        <p id="stats-consist" class="text-lg font-black text-amber-400">100%</p>
+                    </div>
+                    <div class="bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-center shadow-md">
+                        <p class="text-[8.5px] text-slate-500 font-bold mb-0.5">大腦主觀心智帶</p>
+                        <p id="stats-verts" class="text-lg font-black text-rose-400">0 邊形</p>
+                    </div>
+                    <div class="bg-slate-900 border border-slate-800 rounded-xl p-2.5 text-center shadow-md">
+                        <p class="text-[8.5px] text-slate-500 font-bold mb-0.5">累積判定投球數</p>
+                        <p id="stats-total" class="text-lg font-black text-slate-100">0</p>
+                    </div>
+                </div>
+                <!-- 里程碑勳章 -->
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-md text-left">
+                    <p class="text-[10px] font-bold text-slate-300 mb-2 border-b border-slate-800 pb-1">🎖️ 生涯執法里程碑勳章</p>
+                    <div id="achievements-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2"></div>
+                </div>
+                <!-- 心智好球帶分布圖 -->
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-md text-left">
+                    <p class="text-[10px] font-bold text-slate-300 mb-1 border-b border-slate-800 pb-1">📍 大腦主觀好球帶裂變散佈圖</p>
+                    <div class="relative bg-slate-950 rounded-xl overflow-hidden border border-slate-800" style="aspect-ratio: 3/1">
+                        <svg id="scatter-svg" class="absolute inset-0 w-full h-full" viewBox="0 0 600 200" preserveAspectRatio="xMidYMid meet"></svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 分頁：備份設定 (Settings Tab) -->
+            <div id="tab-content-settings" class="hidden flex-col gap-3 font-mono flex-1 overflow-y-auto pb-4">
+                <div class="bg-gradient-to-br from-indigo-950 via-slate-900 to-slate-950 border-2 border-cyan-500/50 rounded-2xl p-4 relative overflow-hidden shadow-2xl">
+                    <div class="flex flex-col sm:flex-row gap-4 items-center">
+                        <div class="w-16 h-20 bg-slate-950 border border-slate-700 rounded-lg flex flex-col items-center justify-center p-1"><span class="text-2xl">⚖️</span><p class="text-[6px] text-slate-500 mt-1">OFFICIAL</p></div>
+                        <div class="flex-1 space-y-1.5 text-left w-full">
+                            <div>
+                                <label class="text-[8px] text-slate-500 font-bold block uppercase">主審姓名</label>
+                                <input type="text" id="setting-ump-name" oninput="updateUmpireName(this.value)" class="bg-slate-950 border border-slate-800 px-2 py-0.5 rounded text-xs text-slate-100 font-bold outline-none w-full sm:w-48">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3 shadow-xl text-left">
+                    <p class="text-[10px] font-bold text-cyan-400 border-b border-slate-800 pb-1 uppercase tracking-widest">💾 離線檔案備份與匯入</p>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                        <button onclick="exportSaveData()" class="py-2.5 bg-slate-950 text-slate-300 font-bold border border-slate-700 rounded-xl text-[10px] flex items-center justify-center gap-2">📥 匯出生涯存檔檔案 (.json)</button>
+                        <label class="py-2.5 bg-slate-950 text-slate-300 font-bold border border-slate-700 rounded-xl text-[10px] flex items-center justify-center gap-2 cursor-pointer text-center">
+                            📤 匯入備份存檔檔案 (.json)
+                            <input type="file" accept=".json" onchange="importSaveData(event)" class="hidden">
+                        </label>
+                    </div>
+                </div>
+
+                <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-4 shadow-xl text-left">
+                    <p class="text-[10px] font-bold text-slate-300 border-b border-slate-800 pb-1 uppercase tracking-widest">⚙️ 系統配置與重置</p>
+                    <div>
+                        <button onclick="resetAllSaveData()" class="w-full py-2 rounded-xl border border-rose-900 bg-rose-950/20 text-rose-400 text-[9px] font-black transition">🗑️ 重置所有紀錄與職業生涯數據</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 半局結算 Overlay 彈窗 -->
+        <div id="inning-report-overlay" class="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md hidden items-center justify-center p-3">
+            <div class="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-2xl text-center space-y-3 font-mono">
+                <p class="text-3xl">📊</p>
+                <h2 class="text-lg font-black text-amber-400">攻守交換執法成果</h2>
+                <div class="grid grid-cols-2 gap-2 text-xs text-left">
+                    <div class="bg-slate-950 p-2 rounded border border-slate-800/80">
+                        <p class="text-slate-500 text-[9px] font-bold">執法投球數</p>
+                        <p id="rep-pitches" class="text-base font-bold text-slate-100">0 球</p>
+                    </div>
+                    <div class="bg-slate-950 p-2 rounded border border-slate-800/80">
+                        <p class="text-slate-500 text-[9px] font-bold">判定正確數</p>
+                        <p id="rep-correct" class="text-base font-bold text-emerald-400">0 次</p>
+                    </div>
+                </div>
+                <button onclick="closeInningReport()" class="w-full py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 text-slate-950 font-black rounded-xl shadow-lg">進入下一半局攻守交換</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ══ APP LOGIC SCRIPT ══ -->
+    <script>
+        // 本地快取 key
+        const LOCAL_STORAGE_KEY = "umpire_pro_offline_save_v1";
+
+        // 全域狀態定義
+        const state = {
+            screen: "splash",
+            tab: "game",
+            introPhase: 0,
+            tutStep: 0,
+            
+            umpireName: "尤里",
+            xp: 0,
+            lvl: 0,
+            rep: 100,
+            streak: 0,
+            bestStreak: 0,
+            combo: 1.0,
+            achievements: [],
+            total: 0,
+            acc: 100,
+            inconsistent: 0,
+            unlockedCerts: [],
+
+            activeExam: "free",
+            examPitches: 0,
+            examCorrect: 0,
+
+            inning: 1,
+            isTop: true,
+            outs: 0,
+            strikes: 0,
+            balls: 0,
+            awayScore: 0,
+            homeScore: 0,
+            runners: [false, false, false],
+            awayCh: 3,
+            homeCh: 3,
+
+            wind: WINDS[0],
+            batter: BATTERS[0],
+            pitcher: PITCHERS[0],
+            catcher: CATCHERS[0],
+
+            pitch: null,
+            phase: "ready", // ready, ready_fading, pitching, decision, outcome
+            ballProg: 0,
+            ballPos: { x: 0, y: -1.2 },
+            zoneHidden: false,
+            locked: false,
+            fadeP: 0,
+            ctarget: { x: 0, y: 0 },
+            crossUp: false,
+            fluke: "normal",
+            challenge: null,
+            absP: 0,
+            absComplete: false,
+            absVerdict: false,
+            crowdFavor: 50,
+            screenShake: false,
+            reactionMs: null,
+            zoneMargin: 0.0,
+            history: [],
+            recent: [],
+            zVerts: [],
+            miscalls: 0,
+            muted: false
+        };
+
+        // 綁定 DOM 元素
+        const el = {
+            screenSplash: document.getElementById("screen-splash"),
+            screenIntro: document.getElementById("screen-intro"),
+            screenTutorial: document.getElementById("screen-tutorial"),
+            screenMenu: document.getElementById("screen-menu"),
+            screenLive: document.getElementById("screen-live"),
+            tabControls: document.getElementById("tab-controls"),
+            headerProgress: document.getElementById("header-progress"),
+            progressTitle: document.getElementById("progress-title"),
+            progressXp: document.getElementById("progress-xp"),
+            progressBar: document.getElementById("progress-bar"),
+            tabGame: document.getElementById("tab-content-game"),
+            tabScorecard: document.getElementById("tab-content-scorecard"),
+            tabSettings: document.getElementById("tab-content-settings"),
+            btnTabGame: document.getElementById("btn-tab-game"),
+            btnTabScorecard: document.getElementById("btn-tab-scorecard"),
+            btnTabSettings: document.getElementById("btn-tab-settings"),
+            toastNotif: document.getElementById("toast-notif"),
+            btnMute: document.getElementById("btn-mute"),
+            examListContainer: document.getElementById("exam-list-container"),
+            inningArrow: document.getElementById("inning-arrow"),
+            inningText: document.getElementById("inning-text"),
+            scoreAway: document.getElementById("score-away"),
+            scoreHome: document.getElementById("score-home"),
+            lightsStrike: document.getElementById("lights-strike"),
+            lightsBall: document.getElementById("lights-ball"),
+            lightsOut: document.getElementById("lights-out"),
+            base1: document.getElementById("base-1"),
+            base2: document.getElementById("base-2"),
+            base3: document.getElementById("base-3"),
+            windText: document.getElementById("wind-text"),
+            pPitcher: document.getElementById("p-pitcher"),
+            pCatcher: document.getElementById("p-catcher"),
+            pBatter: document.getElementById("p-batter"),
+            telemetryBox: document.getElementById("telemetry-box"),
+            telemetryEmpty: document.getElementById("telemetry-empty"),
+            telAbbr: document.getElementById("tel-abbr"),
+            telSpeed: document.getElementById("tel-speed"),
+            telBrkx: document.getElementById("tel-brkx"),
+            telBrky: document.getElementById("tel-brky"),
+            telDelay: document.getElementById("tel-delay"),
+            controlReady: document.getElementById("control-ready"),
+            controlFading: document.getElementById("control-fading"),
+            controlPitching: document.getElementById("control-pitching"),
+            controlDecision: document.getElementById("control-decision"),
+            fbBannerText: document.getElementById("fb-banner-text"),
+            recentPitchesList: document.getElementById("recent-pitches-list"),
+            repPercentText: document.getElementById("rep-percent-text"),
+            repProgressBar: document.getElementById("rep-progress-bar"),
+            statsAcc: document.getElementById("stats-acc"),
+            statsConsist: document.getElementById("stats-consist"),
+            statsVerts: document.getElementById("stats-verts"),
+            statsTotal: document.getElementById("stats-total"),
+            achievementsGrid: document.getElementById("achievements-grid"),
+            settingUmpName: document.getElementById("setting-ump-name"),
+            gameSvg: document.getElementById("game-svg"),
+            scatterSvg: document.getElementById("scatter-svg"),
+            toastOverlay: document.getElementById("inning-report-overlay"),
+            repPitches: document.getElementById("rep-pitches"),
+            repCorrect: document.getElementById("rep-correct"),
+            absOverlay: document.getElementById("abs-overlay"),
+            absStatus: document.getElementById("abs-status"),
+            absSvg: document.getElementById("abs-svg"),
+            absScanline: document.getElementById("abs-scanline"),
+            absInfoText: document.getElementById("abs-info-text"),
+            btnAbsVerdict: document.getElementById("btn-abs-verdict"),
+            callEffectOverlay: document.getElementById("call-effect-overlay"),
+            callEffectTitle: document.getElementById("call-effect-title"),
+            callEffectSub: document.getElementById("call-effect-sub"),
+            examHud: document.getElementById("exam-hud"),
+            examHudTitle: document.getElementById("exam-hud-title"),
+            examHudProgress: document.getElementById("exam-hud-progress")
+        };
+
+        // 局統計用
+        const inningPitchesCount = { count: 0, correct: 0 };
+
+        // 載入與初始化存檔
+        function loadSaveData() {
+            try {
+                const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
+                if (saved) {
+                    const parsed = JSON.parse(saved);
+                    if (parsed.umpireName) state.umpireName = parsed.umpireName;
+                    if (parsed.xp !== undefined) state.xp = parsed.xp;
+                    if (parsed.lvl !== undefined) state.lvl = parsed.lvl;
+                    if (parsed.rep !== undefined) state.rep = parsed.rep;
+                    if (parsed.bestStreak !== undefined) state.bestStreak = parsed.bestStreak;
+                    if (parsed.achievements) state.achievements = parsed.achievements;
+                    if (parsed.unlockedCerts) state.unlockedCerts = parsed.unlockedCerts;
+                    if (parsed.history) state.history = parsed.history;
+                    if (parsed.recent) state.recent = parsed.recent;
+                    if (parsed.zVerts) state.zVerts = parsed.zVerts;
+                    if (parsed.zoneMargin !== undefined) state.zoneMargin = parsed.zoneMargin;
+                    if (parsed.inconsistent !== undefined) state.inconsistent = parsed.inconsistent;
+                    console.log("iOS 離線本地存檔加載成功");
+                }
+            } catch(e) {
+                console.error(e);
+            }
+        }
+
+        // 儲存進度
+        function saveProgress() {
+            try {
+                const toSave = {
+                    umpireName: state.umpireName,
+                    xp: state.xp,
+                    lvl: state.lvl,
+                    rep: state.rep,
+                    bestStreak: state.bestStreak,
+                    achievements: state.achievements,
+                    unlockedCerts: state.unlockedCerts,
+                    history: state.history,
+                    recent: state.recent,
+                    zVerts: state.zVerts,
+                    zoneMargin: state.zoneMargin,
+                    inconsistent: state.inconsistent
+                };
+                localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(toSave));
+            } catch(e) {
+                console.error(e);
+            }
+        }
+
+        // 跳窗通知
+        function showNotification(msg) {
+            el.toastNotif.innerText = msg;
+            el.toastNotif.classList.remove("hidden");
+            setTimeout(() => {
+                el.toastNotif.classList.add("hidden");
+            }, 3000);
+        }
+
+        // 靜音切換
+        function toggleMute() {
+            state.muted = !state.muted;
+            synth.muted = state.muted;
+            el.btnMute.innerText = state.muted ? "🔇" : "🔊";
+        }
+
+        // 開機進入劇情
+        function bootSystem() {
+            synth._init();
+            loadSaveData();
+            state.screen = "intro";
+            updateScreens();
+            playIntroSequence(0);
+        }
+
+        // 劇情動畫
+        function playIntroSequence(index) {
+            if (state.screen !== "intro") return;
+            if (index >= INTRO_QUOTES.length) {
+                state.screen = "tutorial";
+                updateScreens();
+                return;
+            }
+            state.introPhase = index;
+            const text = INTRO_QUOTES[index];
+            document.getElementById("intro-text-box").innerText = `“ ${text} ”`;
+
+            if (state.muted) {
+                const duration = text.split(" ").length * 350 + 800;
+                setTimeout(() => {
+                    if (index === 5) {
+                        synth.playIntroBoom();
+                        setTimeout(() => {
+                            state.screen = "tutorial";
+                            updateScreens();
+                        }, 2300);
+                    } else {
+                        playIntroSequence(index + 1);
+                    }
+                }, duration);
+            } else {
+                speak(text, false);
+                // 使用 TTS callback 控制下一句
+                if (window.speechSynthesis) {
+                    const synthUtterance = new SpeechSynthesisUtterance(text);
+                    synthUtterance.lang = "en-US";
+                    synthUtterance.rate = 1.0;
+                    synthUtterance.onend = () => {
+                        setTimeout(() => {
+                            if (index === 5) {
+                                synth.playIntroBoom();
+                                setTimeout(() => {
+                                    state.screen = "tutorial";
+                                    updateScreens();
+                                }, 2300);
+                            } else {
+                                playIntroSequence(index + 1);
+                            }
+                        }, 500);
+                    };
+                    window.speechSynthesis.speak(synthUtterance);
+                }
+            }
+        }
+
+        function skipIntro() {
+            state.screen = "tutorial";
+            updateScreens();
+        }
+
+        // 教學翻頁
+        function nextTutorialStep() {
+            const tutData = [
+                { t: "⚖️ 歡迎來到主審特訓系統", d: "這不是打擊遊戲。你將站在主審視角，靠肉眼判斷動態速球是否切過好球帶邊緣。", i: "👀" },
+                { t: "⚾ 官方好球：球體外緣觸線即好球", d: "大聯盟官方規則不需要「球心」進好球帶！只要球皮最外側的邊緣「哪怕只有 1 毫米」碰到好球帶界線，就是一顆完全成立的好球！", i: "🥎" },
+                { t: "🧤 當心捕手偷球 (Framing)", d: "頂級捕手會以柔順的手腕將外側壞球扯進好球帶！你必須專注鎖定「撞擊手套的瞬間初始位置」，排除偷球干擾。", i: "🧲" },
+                { t: "📡 觸控判定與 ABS 挑戰系統", d: "投球進壘後，點擊底部【壞球 BALL】或【好球 STRIKE】。\n如果遇到球隊發起 ABS 挑戰，將切換至電子鷹眼測量球皮觸線深度！", i: "📡" }
+            ];
+            state.tutStep++;
+            if (state.tutStep >= tutData.length) {
+                enterMainMenu();
+            } else {
+                document.getElementById("tut-icon").innerText = tutData[state.tutStep].i;
+                document.getElementById("tut-title").innerText = tutData[state.tutStep].t;
+                document.getElementById("tut-desc").innerText = tutData[state.tutStep].d;
+                if (state.tutStep === tutData.length - 1) {
+                    document.getElementById("btn-tut-next").innerText = "完成，進入主選單！";
+                }
+            }
+        }
+
+        function enterMainMenu() {
+            state.screen = "menu";
+            updateScreens();
+            renderExamList();
+        }
+
+        // 渲染主選單考試卡片
+        function renderExamList() {
+            el.examListContainer.innerHTML = "";
+            EXAMS_LIST.forEach(e => {
+                const unlocked = state.unlockedCerts.includes(e.id);
+                const isSelected = state.activeExam === e.id;
+                const card = document.createElement("button");
+                card.className = `w-full p-2.5 rounded-xl border text-left text-xs transition duration-200 relative overflow-hidden ${isSelected ? 'bg-amber-950/40 border-amber-500 text-amber-300 shadow-md' : 'bg-slate-950/80 border-slate-800 text-slate-400'}`;
+                card.onclick = () => {
+                    state.activeExam = e.id;
+                    renderExamList();
+                };
+                card.innerHTML = `
+                    ${unlocked ? '<div class="absolute top-1 right-1 bg-amber-500 text-slate-950 text-[7px] font-black px-1.5 py-0.2 rounded-full">已解鎖證照</div>' : ''}
+                    <div class="font-bold flex items-center gap-1.5 text-slate-200 mb-0.5">
+                        <span>${e.icon || "🎓"}</span><span>${e.name}</span>
+                    </div>
+                    <span class="text-slate-500 font-mono text-[9px] leading-snug block">${e.desc}</span>
+                `;
+                el.examListContainer.appendChild(card);
+            });
+        }
+
+        // 開始執法實戰
+        function startLiveUmpire() {
+            state.screen = "live";
+            state.tab = "game";
+            state.examPitches = 0;
+            state.examCorrect = 0;
+            updateScreens();
+            resetInningState();
+            nextBatter();
+        }
+
+        function backToMenu() {
+            state.screen = "menu";
+            updateScreens();
+        }
+
+        // 基礎重置
+        function resetInningState() {
+            state.inning = 1;
+            state.isTop = true;
+            state.outs = 0;
+            state.strikes = 0;
+            state.balls = 0;
+            state.awayScore = 0;
+            state.homeScore = 0;
+            state.runners = [false, false, false];
+            inningPitchesCount.count = 0;
+            inningPitchesCount.correct = 0;
+        }
+
+        function nextBatter() {
+            state.batter = BATTERS[Math.floor(Math.random() * BATTERS.length)];
+            state.strikes = 0;
+            state.balls = 0;
+            state.wind = WINDS[Math.floor(Math.random() * WINDS.length)];
+            
+            // 初始化好球帶分裂多邊形（僅當沒有存檔時）
+            if (state.zVerts.length === 0) {
+                const { tB, bB } = state.batter;
+                state.zVerts = [{ x: -1, y: tB }, { x: 1, y: tB }, { x: 1, y: bB }, { x: -1, y: bB }];
+            }
+
+            updateScoreboard();
+            draw2DZone();
+        }
+
+        // 狀態同步渲染主引擎 (螢幕切換)
+        function updateScreens() {
+            // 隱藏所有
+            el.screenSplash.classList.add("hidden");
+            el.screenIntro.classList.add("hidden");
+            el.screenTutorial.classList.add("hidden");
+            el.screenMenu.classList.add("hidden");
+            el.screenLive.classList.add("hidden");
+            el.tabControls.classList.add("hidden");
+            el.headerProgress.classList.add("hidden");
+
+            if (state.screen === "splash") {
+                el.screenSplash.classList.remove("hidden");
+            } else if (state.screen === "intro") {
+                el.screenIntro.classList.remove("hidden");
+            } else if (state.screen === "tutorial") {
+                el.screenTutorial.classList.remove("hidden");
+            } else if (state.screen === "menu") {
+                el.screenMenu.classList.remove("hidden");
+            } else if (state.screen === "live") {
+                el.screenLive.classList.remove("hidden");
+                el.tabControls.classList.remove("hidden");
+                el.headerProgress.classList.remove("hidden");
+                updateCareerProgress();
+                switchTab(state.tab);
+            }
+        }
+
+        function updateCareerProgress() {
+            const curLvl = LEVELS[state.lvl] || LEVELS[0];
+            el.progressTitle.innerText = curLvl.title;
+            el.progressXp.innerText = `${state.xp} / ${curLvl.xpMax} XP`;
+            const frac = Math.min(100, (state.xp / curLvl.xpMax) * 100);
+            el.progressBar.style.width = `${frac}%`;
+
+            // 設定輸入框的名字
+            el.settingUmpName.value = state.umpireName;
+        }
+
+        // 切換分頁
+        function switchTab(tabId) {
+            state.tab = tabId;
+            el.tabGame.classList.add("hidden");
+            el.tabScorecard.classList.add("hidden");
+            el.tabSettings.classList.add("hidden");
+
+            el.btnTabGame.className = "px-2 py-1 rounded-md text-[10px] font-bold text-slate-400";
+            el.btnTabScorecard.className = "px-2 py-1 rounded-md text-[10px] font-bold text-slate-400";
+            el.btnTabSettings.className = "px-2 py-1 rounded-md text-[10px] font-bold text-slate-400";
+
+            if (tabId === "game") {
+                el.tabGame.classList.remove("hidden");
+                el.btnTabGame.className = "px-2 py-1 rounded-md text-[10px] font-bold bg-amber-500 text-slate-950";
+                draw2DZone();
+            } else if (tabId === "scorecard") {
+                el.tabScorecard.classList.remove("hidden");
+                el.btnTabScorecard.className = "px-2 py-1 rounded-md text-[10px] font-bold bg-amber-500 text-slate-950";
+                updateScorecardStats();
+            } else if (tabId === "settings") {
+                el.tabSettings.classList.remove("hidden");
+                el.btnTabSettings.className = "px-2 py-1 rounded-md text-[10px] font-bold bg-amber-500 text-slate-950";
+            }
+        }
+
+        // 更新記分板亮燈與進度
+        function updateScoreboard() {
+            el.inningArrow.innerText = state.isTop ? "▲" : "▼";
+            el.inningText.innerText = `${state.inning}局`;
+            el.scoreAway.innerText = state.awayScore;
+            el.scoreHome.innerText = state.homeScore;
+
+            // 投球風力與打者資料
+            el.windText.innerText = `${state.wind.icon} ${state.wind.name}`;
+            el.pPitcher.innerText = state.pitcher.name.split(" ")[0];
+            el.pCatcher.innerText = state.catcher.name;
+            el.pBatter.innerText = `${state.batter.name}(${state.batter.stance})`;
+
+            // S/B/O 燈光
+            const renderLights = (lightsContainer, count, max) => {
+                lightsContainer.innerHTML = "";
+                for (let i = 0; i < max; i++) {
+                    const dot = document.createElement("div");
+                    if (i < count) {
+                        dot.className = `w-2.5 h-2.5 rounded-full shadow-md ${lightsContainer.id === 'lights-strike' ? 'bg-amber-400 shadow-amber-400/50' : lightsContainer.id === 'lights-ball' ? 'bg-emerald-400 shadow-emerald-400/50' : 'bg-rose-500 shadow-rose-500/50'}`;
+                    } else {
+                        dot.className = "w-2.5 h-2.5 rounded-full bg-slate-800 border border-slate-700";
+                    }
+                    lightsContainer.appendChild(dot);
+                }
+            };
+            renderLights(el.lightsStrike, state.strikes, 2);
+            renderLights(el.lightsBall, state.balls, 3);
+            renderLights(el.lightsOut, state.outs, 2);
+
+            // 壘包顯示
+            el.base1.className = `absolute w-2.5 h-2.5 rounded-sm transition-all duration-300 bottom-0 right-0 ${state.runners[0] ? 'bg-amber-400 shadow' : 'bg-slate-800 border border-slate-700/60'}`;
+            el.base2.className = `absolute w-2.5 h-2.5 rounded-sm transition-all duration-300 top-0 left-1/2 -translate-x-1/2 ${state.runners[1] ? 'bg-amber-400 shadow' : 'bg-slate-800 border border-slate-700/60'}`;
+            el.base3.className = `absolute w-2.5 h-2.5 rounded-sm transition-all duration-300 bottom-0 left-0 ${state.runners[2] ? 'bg-amber-400 shadow' : 'bg-slate-800 border border-slate-700/60'}`;
+
+            // 聲譽與正確率
+            el.repPercentText.innerText = `${state.rep}%`;
+            el.repProgressBar.style.width = `${state.rep}%`;
+            if (state.rep >= 80) el.repProgressBar.style.backgroundColor = "#10b981";
+            else if (state.rep >= 60) el.repProgressBar.style.backgroundColor = "#f59e0b";
+            else el.repProgressBar.style.backgroundColor = "#ef4444";
+
+            // 考試 HUD
+            if (state.activeExam !== "free") {
+                el.examHud.classList.remove("hidden");
+                el.examHudTitle.innerText = EXAMS_LIST.find(e => e.id === state.activeExam)?.name || "";
+                el.examHudProgress.innerText = `已投球: ${state.examPitches} / 10 (答對 ${state.examCorrect})`;
+            } else {
+                el.examHud.classList.add("hidden");
+            }
+        }
+
+        /* ═══════════════════════════════════════════════════════════
+           好球帶 2D 渲染 (Vanilla SVG Generator)
+        ═══════════════════════════════════════════════════════════ */
+        function draw2DZone() {
+            const W = 320, H = 360, ZW = 120, ZH = 140, ZY = 90;
+            const { tB, bB } = state.batter;
+            const topY = ZY + ZH / 2 + tB * (ZH / 2);
+            const botY = ZY + ZH / 2 + bB * (ZH / 2);
+            const effL = (ZW / 2) * (1 + state.zoneMargin);
+            const effTopY = topY - state.zoneMargin * (ZH / 2);
+            const effBotY = botY + state.zoneMargin * (ZH / 2);
+
+            let gX = W / 2 + state.ctarget.x * (ZW / 2);
+            let gY = ZY + ZH / 2 + state.ctarget.y * (ZH / 2);
+            let dX = W / 2;
+            let dY = ZY + ZH / 2;
+
+            if (state.phase === "ready_fading") {
+                gY = gY + (botY - gY) * state.fadeP;
+                dY = ZY + ZH / 2 - 1.2 * (ZH / 2);
+            } else if (state.pitch) {
+                const realX_px = W / 2 + state.pitch.realX * (ZW / 2);
+                const realY_px = ZY + ZH / 2 + state.pitch.realY * (ZH / 2);
+                const framedX_px = W / 2 + state.pitch.framedX * (ZW / 2);
+                const framedY_px = ZY + ZH / 2 + state.pitch.framedY * (ZH / 2);
+
+                if (state.ballProg < 0.88) {
+                    dX = W / 2 + (state.ballPos.x * (ZW / 2));
+                    dY = ZY + ZH / 2 + (state.ballPos.y * (ZH / 2));
+                    gY = botY;
+                } else if (state.ballProg < 0.93) {
+                    const t = (state.ballProg - 0.88) / 0.05;
+                    gX = gX + (realX_px - gX) * t;
+                    gY = botY + (realY_px - botY) * t;
+                    dX = W / 2 + (state.ballPos.x * (ZW / 2));
+                    dY = ZY + ZH / 2 + (state.ballPos.y * (ZH / 2));
+                } else {
+                    const t = (state.ballProg - 0.93) / 0.07;
+                    gX = realX_px + (framedX_px - realX_px) * t;
+                    gY = realY_px + (framedY_px - realY_px) * t;
+                    dX = gX;
+                    dY = gY;
+                }
+            }
+
+            if (state.phase === "decision" && state.pitch) {
+                gX = W / 2 + state.pitch.framedX * (ZW / 2);
+                gY = ZY + ZH / 2 + state.pitch.framedY * (ZH / 2);
+            }
+
+            const zoneBorderColor = (state.phase === "outcome") ? (state.pitch?.isStrike ? "#10b981" : "#f43f5e") : "rgba(186,230,253,0.75)";
+            const ballRadius = 1.2 + state.ballProg * 4.3;
+            const isBallVisible = state.pitch && state.ballProg > 0 && state.ballProg < 0.98;
+
+            let html = `
+                <defs>
+                    <radialGradient id="bg" cx="50%" cy="40%" r="65%">
+                        <stop offset="0%" stop-color="#0f172a"/><stop offset="100%" stop-color="#020617"/>
+                    </radialGradient>
+                    <linearGradient id="grl" x1="0%" y1="100%" x2="0%" y2="0%">
+                        <stop offset="0%" stop-color="#064e3b" stop-opacity=".65"/><stop offset="100%" stop-color="#022c22" stop-opacity="0"/>
+                    </linearGradient>
+                </defs>
+                <rect width="320" height="360" fill="url(#bg)" rx="16"/>
+                <path d="M75,302 L245,302 L295,360 L25,360 Z" fill="url(#grl)"/>
+                <polygon points="108,326 212,326 212,339 160,352 108,339" fill="rgba(30,41,59,.7)" stroke="rgba(148,163,184,.4)" stroke-width="1.5"/>
+            `;
+
+            // 好球帶
+            if (!state.zoneHidden) {
+                html += `
+                    <rect x="${W / 2 - effL}" y="${effTopY}" width="${effL * 2}" height="${effBotY - effTopY}" fill="none" stroke="${zoneBorderColor}" stroke-width="2"/>
+                    <text x="160" y="${effTopY - 8}" font-size="8.5" fill="rgba(186,230,253,.35)" text-anchor="middle" font-family="monospace" letter-spacing="3" font-weight="bold">好球帶 ZONE</text>
+                `;
+            }
+
+            // 手套
+            html += `
+                <g class="glove-anim">
+                    <ellipse cx="${gX}" cy="${gY}" rx="22" ry="19.5" fill="#4a2c11" stroke="#331c0a" stroke-width="2"/>
+                    <circle cx="${gX}" cy="${gY}" r="6" fill="rgba(0,0,0,.3)"/>
+                </g>
+            `;
+
+            // 棒球
+            if (isBallVisible) {
+                html += `<circle cx="${dX}" cy="${dY}" r="${ballRadius}" fill="#fafaf9" stroke="rgba(200,220,255,.5)" stroke-width="0.8"/>`;
+            }
+
+            // 判定結果披露
+            if (state.phase === "outcome" && state.pitch) {
+                const rx = W / 2 + state.pitch.realX * (ZW / 2);
+                const ry = ZY + ZH / 2 + state.pitch.realY * (ZH / 2);
+                const fx = W / 2 + state.pitch.framedX * (ZW / 2);
+                const fy = ZY + ZH / 2 + state.pitch.framedY * (ZH / 2);
+
+                html += `
+                    <circle cx="${rx}" cy="${ry}" r="4.5" fill="none" stroke="#f59e0b" stroke-width="1.5"/>
+                    <circle cx="${rx}" cy="${ry}" r="1.5" fill="#f59e0b"/>
+                    <line x1="${rx}" y1="${ry}" x2="${fx}" y2="${fy}" stroke="#f59e0b" stroke-width="1.8" stroke-dasharray="3,2"/>
+                    <circle cx="${fx}" cy="${fy}" r="3.2" fill="#10b981"/>
+                    <text x="${rx}" y="${ry - 10}" font-size="8" text-anchor="middle" fill="#f59e0b" font-weight="black">${state.pitch.isStrike ? '● 邊緣觸線 (STRIKE)' : '● 未觸邊界 (BALL)'}</text>
+                `;
+            }
+
+            el.gameSvg.innerHTML = html;
+        }
+
+        /* ═══════════════════════════════════════════════════════════
+           ABS 鷹眼 2D/3D 渲染器 (Pure Vanilla SVG)
+        ═══════════════════════════════════════════════════════════ */
+        function drawABSHawkEye() {
+            if (!state.challenge) return;
+            const W = 320, H = 360, ZW = 120, ZH = 140, ZY = 90;
+            const { tB, bB } = state.batter;
+            const topY = ZY + ZH / 2 + tB * (ZH / 2);
+            const botY = ZY + ZH / 2 + bB * (ZH / 2);
+            const effL = (ZW / 2) * (1 + state.zoneMargin);
+            const effTopY = topY - state.zoneMargin * (ZH / 2);
+            const effBotY = botY + state.zoneMargin * (ZH / 2);
+
+            const finalX = W / 2 + state.challenge.ev.realX * (ZW / 2);
+            const finalY = ZY + ZH / 2 + state.challenge.ev.realY * (ZH / 2);
+
+            const pathP = Math.min(1.0, state.absP * 1.5);
+            const pts = [];
+            for (let t = 0; t <= pathP; t += 0.05) {
+                pts.push({
+                    x: W / 2 + ((state.challenge.ev.realX * t + (state.challenge.ev.type.brkX / 100) * Math.sin(t * Math.PI)) * (ZW / 2)),
+                    y: ZY + ZH / 2 + ((-1.2 * (1 - t) + state.challenge.ev.realY * t + (state.challenge.ev.type.brkY / 100) * Math.sin(t * Math.PI)) * (ZH / 2)),
+                });
+            }
+
+            const ballRadius = 2.5 + state.absP * 7.7;
+            const bX = pts.length ? pts[pts.length - 1].x : W / 2;
+            const bY = pts.length ? pts[pts.length - 1].y : ZY + ZH / 2;
+
+            const zFill = state.absVerdict ? (state.challenge.ev.isStrike ? 'rgba(16,185,129,.22)' : 'rgba(59,130,246,.18)') : 'rgba(56,189,248,.08)';
+            const zStroke = state.absVerdict ? (state.challenge.ev.isStrike ? '#10b981' : '#3b82f6') : '#38bdf8';
+
+            let html = `
+                <rect x="${W / 2 - effL}" y="${effTopY}" width="${effL * 2}" height="${effBotY - effTopY}" fill="${zFill}" stroke="${zStroke}" stroke-width="2"/>
+            `;
+
+            if (pts.length > 1) {
+                const pointsStr = pts.map(p => `${p.x},${p.y}`).join(" ");
+                html += `<polyline points="${pointsStr}" fill="none" stroke="${state.challenge.ev.type.color}" stroke-width="1.5"/>`;
+            }
+
+            html += `<circle cx="${bX}" cy="${bY}" r="${ballRadius}" fill="#fff"/>`;
+
+            if (state.absComplete && state.absVerdict) {
+                const chColor = state.challenge.ev.isStrike ? "#10b981" : "#3b82f6";
+                html += `
+                    <circle cx="${finalX}" cy="${finalY}" r="${ballRadius + 1.5}" fill="none" stroke="${chColor}" stroke-width="0.8"/>
+                    <line x1="${finalX - 18}" y1="${finalY}" x2="${finalX + 18}" y2="${finalY}" stroke="${chColor}" stroke-width="0.8"/>
+                    <line x1="${finalX}" y1="${finalY - 18}" x2="${finalX}" y2="${finalY + 18}" stroke="${chColor}" stroke-width="0.8"/>
+                `;
+            }
+
+            el.absSvg.innerHTML = html;
+        }
+
+        /* ═══════════════════════════════════════════════════════════
+           對戰投球動作引擎
+        ═══════════════════════════════════════════════════════════ */
+        function startPitch() {
+            if (state.phase !== "ready" || state.locked) return;
+            state.locked = true;
+            state.zoneHidden = true;
+
+            // 狀態切換
+            state.phase = "ready_fading";
+            el.controlReady.classList.add("hidden");
+            el.controlFading.classList.remove("hidden");
+            el.fbBannerText.innerText = "🔒 好球帶隱形！捕手正在拉拽手套干擾視界…";
+
+            draw2DZone();
+
+            let start = null;
+            const anim = (timestamp) => {
+                if (!start) start = timestamp;
+                const progress = Math.min(1.0, (timestamp - start) / 200);
+                state.fadeP = progress;
+                draw2DZone();
+                if (progress < 1.0) {
+                    requestAnimationFrame(anim);
+                } else {
+                    executePitchFlight();
+                }
+            };
+            requestAnimationFrame(anim);
+        }
+
+        function executePitchFlight() {
+            state.phase = "pitching";
+            el.controlFading.classList.add("hidden");
+            el.controlPitching.classList.remove("hidden");
+            el.fbBannerText.innerText = "⚾ 棒球高速飛行中！請鎖定進壘瞬間。";
+
+            // 隨機選球種
+            const type = PITCH_TYPES[Math.floor(Math.random() * PITCH_TYPES.length)];
+            const spd = Math.round(type.spd[0] + Math.random() * (type.spd[1] - type.spd[0]));
+            const spin = Math.round(type.spin[0] + Math.random() * (type.spin[1] - type.spin[0]));
+            const speedMs = 1100 - spd * 4.2;
+
+            // 核心判定座標計算
+            const isStrikeWant = Math.random() < 0.45;
+            let realX = (Math.random() - 0.5) * 1.5;
+            let realY = state.batter.tB + Math.random() * (state.batter.bB - state.batter.tB);
+
+            if (!isStrikeWant) {
+                realX += (Math.random() > 0.5 ? 1 : -1) * 0.9;
+            }
+
+            // 邊界判定
+            const r_x = 0.17;
+            const r_y = 0.145;
+            const isStrike = Math.abs(realX) <= (1.0 + state.zoneMargin + r_x) && 
+                             realY >= (state.batter.tB - r_y) && 
+                             realY <= (state.batter.bB + r_y);
+
+            state.pitch = {
+                id: Date.now(),
+                type: type,
+                speed: spd,
+                spin: spin,
+                realX: realX,
+                realY: realY,
+                framedX: realX + (Math.random() - 0.5) * 0.2, // 捕手偷球偏移
+                framedY: realY + (Math.random() - 0.5) * 0.2,
+                isStrike: isStrike
+            };
+
+            synth.playWhoosh();
+
+            let flightStart = null;
+            const flightAnim = (timestamp) => {
+                if (!flightStart) flightStart = timestamp;
+                const prog = Math.min(1.0, (timestamp - flightStart) / speedMs);
+                state.ballProg = prog;
+                state.ballPos = {
+                    x: realX * prog + (type.brkX / 100) * Math.sin(prog * Math.PI),
+                    y: -1.2 * (1 - prog) + realY * prog + (type.brkY / 100) * Math.sin(prog * Math.PI)
+                };
+                draw2DZone();
+
+                if (prog < 1.0) {
+                    requestAnimationFrame(flightAnim);
+                } else {
+                    resolvePitchDecision();
+                }
+            };
+            requestAnimationFrame(flightAnim);
+        }
+
+        function resolvePitchDecision() {
+            synth.playPop();
+            state.phase = "decision";
+            state.locked = false;
+            el.controlPitching.classList.add("hidden");
+            el.controlDecision.classList.remove("hidden");
+            el.fbBannerText.innerText = "⚾ 撞擊手套！請判定：好球 [STRIKE] 或壞球 [BALL]？";
+            decisionT.current = Date.now();
+        }
+
+        // 判定處理
+        function triggerCall(action) {
+            if (state.phase !== "decision") return;
+            state.phase = "outcome";
+            el.controlDecision.classList.add("hidden");
+
+            const isCorrect = (action === "strike_action") === state.pitch.isStrike;
+            const label = action === "strike_action" ? "STRIKE" : "BALL";
+
+            // 增加局與整體統計
+            state.total++;
+            inningPitchesCount.count++;
+            if (isCorrect) {
+                state.streak++;
+                state.xp += 15 * state.streak;
+                inningPitchesCount.correct++;
+                synth.playCheer();
+                speak(state.pitch.isStrike ? "Strike!" : "Ball!", false);
+                el.fbBannerText.innerText = `✅ 判斷精確！這是一顆【${state.pitch.isStrike?'好球':'壞球'}】！`;
+            } else {
+                state.streak = 0;
+                state.rep = Math.max(0, state.rep - 10);
+                synth.playBuzzer();
+                speak("Incorrect!", false);
+                el.fbBannerText.innerText = `❌ 判決失誤！實際為【${state.pitch.isStrike?'好球':'壞球'}】。`;
+            }
+
+            // 挑戰機率觸發
+            const chProb = !isCorrect ? 0.35 : 0.05;
+            if (Math.random() < chProb && (state.isTop ? state.awayCh : state.homeCh) > 0) {
+                triggerABSHawkEye(action, isCorrect, label);
+            } else {
+                applyUmpireCall(label, isCorrect);
+            }
+        }
+
+        function triggerABSHawkEye(action, isCorrect, label) {
+            state.challenge = {
+                ev: state.pitch,
+                isCorrect: isCorrect,
+                callLabel: label,
+                challTeam: state.isTop ? "away" : "home"
+            };
+            state.absP = 0;
+            state.absComplete = false;
+            state.absVerdict = false;
+
+            el.absOverlay.classList.remove("hidden");
+            el.absStatus.innerText = "🛰️ SCANNING PATH";
+            el.absInfoText.innerText = `🧢 ${state.isTop?'客隊':'主隊'}發起 ABS 電子挑戰！`;
+
+            synth.playWhistle();
+
+            let absStart = null;
+            const absAnim = (timestamp) => {
+                if (!absStart) absStart = timestamp;
+                const progress = Math.min(1.0, (timestamp - absStart) / 1200);
+                state.absP = progress;
+                drawABSHawkEye();
+                if (progress < 1.0) {
+                    requestAnimationFrame(absAnim);
+                } else {
+                    state.absComplete = true;
+                    el.absStatus.innerText = "🛰️ TRACKING COMPLETE";
+                    el.btnAbsVerdict.classList.remove("hidden");
+                }
+            };
+            requestAnimationFrame(absAnim);
+        }
+
+        function confirmChallenge() {
+            state.absVerdict = true;
+            drawABSHawkEye();
+            el.btnAbsVerdict.classList.add("hidden");
+
+            setTimeout(() => {
+                el.absOverlay.classList.add("hidden");
+                if (state.challenge.isCorrect) {
+                    if (state.challenge.challTeam === "away") state.awayCh--; else state.homeCh--;
+                    showNotification("❌ 挑戰失敗！維持原判。");
+                    applyUmpireCall(state.challenge.callLabel, true);
+                } else {
+                    showNotification("✅ 挑戰成功！判決遭推翻。");
+                    const overturned = state.challenge.callLabel === "STRIKE" ? "BALL" : "STRIKE";
+                    applyUmpireCall(overturned, true);
+                }
+                state.challenge = null;
+            }, 1800);
+        }
+
+        function applyUmpireCall(label, isCorrect) {
+            // 最近紀錄
+            state.recent.push(state.pitch);
+            if (state.recent.length > 3) state.recent.shift();
+
+            // 歷史紀錄
+            state.history.push({
+                id: state.pitch.id,
+                type: state.pitch.type,
+                speed: state.pitch.speed,
+                isCorrect: isCorrect,
+                called: label,
+                isStrike: state.pitch.isStrike
+            });
+
+            // 更新好球/壞球/出局數
+            if (label === "STRIKE") {
+                state.strikes++;
+                if (state.strikes >= 3) {
+                    state.outs++;
+                    showNotification("Strikeout! 打者三振出局！");
+                    nextBatter();
+                }
+            } else {
+                state.balls++;
+                if (state.balls >= 4) {
+                    showNotification("Walk! 四壞球保送！");
+                    resolveWalkRunners();
+                    nextBatter();
+                }
+            }
+
+            if (state.outs >= 3) {
+                triggerInningReport();
+            }
+
+            // 更新最近軌跡 DOM
+            renderRecentPitches();
+
+            // 生涯更新
+            saveProgress();
+
+            setTimeout(() => {
+                state.phase = "ready";
+                el.controlReady.classList.remove("hidden");
+                updateScoreboard();
+                draw2DZone();
+            }, 1500);
+        }
+
+        function resolveWalkRunners() {
+            if (!state.runners[0]) {
+                state.runners[0] = true;
+            } else if (!state.runners[1]) {
+                state.runners[1] = true;
+            } else if (!state.runners[2]) {
+                state.runners[2] = true;
+            } else {
+                if (state.isTop) state.awayScore++; else state.homeScore++;
+                showNotification("Score! 擠回一分！");
+            }
+        }
+
+        function triggerInningReport() {
+            el.repPitches.innerText = `${inningPitchesCount.count} 球`;
+            el.repCorrect.innerText = `${inningPitchesCount.correct} 次`;
+            el.toastOverlay.classList.remove("hidden");
+        }
+
+        function closeInningReport() {
+            el.toastOverlay.classList.add("hidden");
+            state.outs = 0;
+            state.strikes = 0;
+            state.balls = 0;
+            inningPitchesCount.count = 0;
+            inningPitchesCount.correct = 0;
+
+            if (state.isTop) {
+                state.isTop = false;
+            } else {
+                state.isTop = true;
+                state.inning++;
+            }
+            nextBatter();
+        }
+
+        function renderRecentPitches() {
+            el.recentPitchesList.innerHTML = "";
+            state.recent.slice().reverse().forEach(p => {
+                const item = document.createElement("div");
+                item.className = "p-1.5 rounded-lg border border-slate-800 bg-slate-900/40 font-mono text-[9.5px] flex justify-between";
+                item.innerHTML = `
+                    <span style="color: ${p.type.color}">${p.type.abbr} · ${p.speed}k</span>
+                    <span class="${p.isStrike?'text-emerald-400':'text-rose-400'}">${p.isStrike?'STRIKE':'BALL'}</span>
+                `;
+                el.recentPitchesList.appendChild(item);
+            });
+        }
+
+        /* ═══════════════════════════════════════════════════════════
+           生涯數據與備份設定邏輯
+        ═══════════════════════════════════════════════════════════ */
+        function updateScorecardStats() {
+            const correctCount = state.history.filter(h => h.isCorrect).length;
+            const totalCount = state.history.length;
+            const accFrac = totalCount ? Math.round((correctCount / totalCount) * 100) : 100;
+
+            el.statsAcc.innerText = `${accFrac}%`;
+            el.statsTotal.innerText = totalCount;
+            el.statsVerts.innerText = `${state.zVerts.length} 邊形`;
+            el.statsConsist.innerText = `${Math.max(0, 100 - state.inconsistent * 10)}%`;
+
+            // 里程碑勳章
+            el.achievementsGrid.innerHTML = "";
+            ACHIEVEMENTS_LIST.forEach(a => {
+                const unlocked = state.achievements.includes(a.id);
+                const card = document.createElement("div");
+                card.className = `p-2 rounded-lg border ${unlocked ? 'bg-cyan-950/20 border-cyan-500/50 text-cyan-400' : 'bg-slate-950/50 border-slate-800 opacity-60 text-slate-500'}`;
+                card.innerHTML = `
+                    <div class="flex items-center gap-1.5 mb-0.5"><span class="text-base">${a.icon}</span><span class="text-[10px] font-bold">${a.title}</span></div>
+                    <p class="text-[8.5px] leading-snug">${a.desc}</p>
+                `;
+                el.achievementsGrid.appendChild(card);
+            });
+
+            // 繪製散佈圖
+            drawScatterChart();
+        }
+
+        function drawScatterChart() {
+            const W = 600, H = 200;
+            let html = `<rect x="240" y="50" width="120" height="100" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="1.5" stroke-dasharray="5,3"/>`;
+            if (state.zVerts && state.zVerts.length >= 3) {
+                const points = state.zVerts.map(v => `${300 + v.x * 60},${100 + v.y * 50}`).join(" ");
+                html += `<polygon points="${points}" fill="rgba(239,68,68,0.1)" stroke="#ef4444" stroke-width="1.8" stroke-dasharray="4,2"/>`;
+            }
+            el.scatterSvg.innerHTML = html;
+        }
+
+        function updateUmpireName(name) {
+            state.umpireName = name.slice(0, 10);
+            saveProgress();
+            updateCareerProgress();
+        }
+
+        function exportSaveData() {
+            try {
+                const savedData = localStorage.getItem(LOCAL_STORAGE_KEY);
+                if (!savedData) {
+                    showNotification("⚠️ 尚無本地生涯數據可匯出！");
+                    return;
+                }
+                const blob = new Blob([savedData], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = `umpire_pro_offline_backup_${new Date().toISOString().slice(0, 10)}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                showNotification("💾 生涯檔案備份成功，已下載至本地端！");
+            } catch (e) {
+                console.error(e);
+                showNotification("❌ 匯出存檔失敗！");
+            }
+        }
+
+        function importSaveData(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const parsed = JSON.parse(e.target.result);
+                    if (parsed.xp !== undefined && parsed.history) {
+                        localStorage.setItem(LOCAL_STORAGE_KEY, e.target.result);
+                        loadSaveData();
+                        showNotification("📂 外部備份檔案匯入完成！");
+                        updateCareerProgress();
+                    } else {
+                        showNotification("❌ 無效的裁判存檔格式！");
+                    }
+                } catch (err) {
+                    console.error(err);
+                    showNotification("❌ 檔案解析失敗。");
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function resetAllSaveData() {
+            localStorage.removeItem(LOCAL_STORAGE_KEY);
+            state.xp = 0;
+            state.lvl = 0;
+            state.rep = 100;
+            state.streak = 0;
+            state.bestStreak = 0;
+            state.achievements = [];
+            state.unlockedCerts = [];
+            state.history = [];
+            state.recent = [];
+            state.zVerts = [];
+            state.inconsistent = 0;
+            showNotification("🗑️ 已清空本地快取，重置數據！");
+            updateCareerProgress();
+        }
+
+        // 初始化
+        window.onload = () => {
+            loadSaveData();
+            updateCareerProgress();
+        };
+    </script>
+</body>
+</html>
+
+```
